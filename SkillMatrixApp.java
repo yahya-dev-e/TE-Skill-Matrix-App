@@ -59,21 +59,15 @@ public class SkillMatrixApp extends Application {
 
         // Show Login Screen first
         if (!showLoginDialog()) {
-            // User closed the login screen without logging in
             System.exit(0);
             return;
         }
 
         root = new BorderPane();
 
-        // Initialize Theme
-        applyTheme();
-
-        root.setTop(createHeader());
-
-        // --- MASTER-DETAIL SPLIT LAYOUT ---
+        // Build Master & Detail Views first
         SplitPane splitPane = new SplitPane();
-        splitPane.setStyle("-fx-background-color: -theme-bg; -fx-padding: 20;");
+        splitPane.setStyle("-fx-background-color: transparent; -fx-padding: 15;");
 
         VBox masterPanel = createMasterPanel();
         VBox detailPanel = createDetailPanel();
@@ -81,8 +75,12 @@ public class SkillMatrixApp extends Application {
         splitPane.getItems().addAll(masterPanel, detailPanel);
         splitPane.setDividerPositions(0.35); // 35% left, 65% right
 
+        root.setTop(createHeader());
         root.setCenter(splitPane);
         root.setBottom(createFooter());
+
+        // Apply Theme after components exist so CSS bindings work across all tables
+        applyTheme();
 
         Scene scene = new Scene(root, 1200, 800);
         primaryStage.setTitle("TE Connectivity - Skill Matrix System");
@@ -102,14 +100,12 @@ public class SkillMatrixApp extends Application {
         try (Connection conn = DriverManager.getConnection(DB_URL);
                 Statement stmt = conn.createStatement()) {
 
-            // 1. Ensure Qualifications cert_path column exists
             try {
                 stmt.execute("ALTER TABLE Qualifications ADD COLUMN cert_path TEXT");
             } catch (SQLException ignored) {
                 // Column already exists
             }
 
-            // 2. Create AuditLogs table for traceability
             String createLogTable = "CREATE TABLE IF NOT EXISTS AuditLogs (" +
                     "log_id INTEGER PRIMARY KEY AUTOINCREMENT, " +
                     "timestamp TEXT NOT NULL, " +
@@ -176,7 +172,6 @@ public class SkillMatrixApp extends Application {
                 String u = username.getText().trim();
                 String p = password.getText().trim();
 
-                // Simple authentication check (Extendable to query DB user table)
                 if (u.equalsIgnoreCase("admin") && p.equals("admin123")) {
                     currentUser = "ADMIN_" + u.toUpperCase();
                     userRole = "ADMIN";
@@ -197,7 +192,7 @@ public class SkillMatrixApp extends Application {
             return true;
         } else if (result.isPresent() && !result.get()) {
             showAlert("Access Denied", "Invalid username or password.");
-            return showLoginDialog(); // Retry
+            return showLoginDialog();
         }
         return false;
     }
@@ -207,29 +202,60 @@ public class SkillMatrixApp extends Application {
     // ==========================================
 
     private void applyTheme() {
-        if (isDarkMode) {
-            root.setStyle(getDarkThemeVars()
-                    + "-fx-background-color: -theme-bg; -fx-font-family: 'Segoe UI', Arial, sans-serif;");
-            if (themeBtn != null)
-                themeBtn.setText("☀️ Light");
-        } else {
-            root.setStyle(getLightThemeVars()
-                    + "-fx-background-color: -theme-bg; -fx-font-family: 'Segoe UI', Arial, sans-serif;");
-            if (themeBtn != null)
-                themeBtn.setText("🌙 Dark");
+        String bgImage = isDarkMode ? "Dark_mode_bg.png" : "Light_mode_bg.png";
+
+        root.setStyle(getActiveThemeVars()
+                + "-fx-background-image: url('file:" + bgImage + "'); "
+                + "-fx-background-size: cover; "
+                + "-fx-background-position: center center; "
+                + "-fx-font-family: 'Segoe UI', Arial, sans-serif;");
+
+        if (themeBtn != null) {
+            themeBtn.setText(isDarkMode ? "☀️ Light" : "🌙 Dark");
         }
+
+        // Apply explicit Table styles to avoid pitch-black row bug
+        String tableStyle;
+        if (isDarkMode) {
+            tableStyle = "-fx-base: #1E1E1E; " +
+                    "-fx-control-inner-background: #252525; " +
+                    "-fx-background-color: #1E1E1E; " +
+                    "-fx-table-cell-border-color: #333333; " +
+                    "-fx-table-header-border-color: #333333; " +
+                    "-fx-text-background-color: #FFFFFF;";
+        } else {
+            tableStyle = "-fx-base: #FFFFFF; " +
+                    "-fx-control-inner-background: #FFFFFF; " +
+                    "-fx-background-color: #FFFFFF; " +
+                    "-fx-table-cell-border-color: #E0E0E0; " +
+                    "-fx-table-header-border-color: #E0E0E0; " +
+                    "-fx-text-background-color: #1C1E21;";
+        }
+
+        if (employeeTable != null)
+            employeeTable.setStyle(tableStyle);
+        if (skillsTable != null)
+            skillsTable.setStyle(tableStyle);
     }
 
     private String getDarkThemeVars() {
-        return "-theme-bg: #121212; -theme-panel: #1E1E1E; -theme-text: #FFFFFF; " +
-                "-theme-muted: #B0B0B0; -theme-border: #333333; -theme-accent: #E4770B; " +
-                "-theme-shadow: rgba(0,0,0,0.5); ";
+        return "-theme-bg: rgba(18, 18, 18, 0.85); " +
+                "-theme-panel: rgba(30, 30, 30, 0.95); " +
+                "-theme-text: #FFFFFF; " +
+                "-theme-muted: #B0B0B0; " +
+                "-theme-border: #333333; " +
+                "-theme-accent: #E4770B; " +
+                "-theme-shadow: rgba(0,0,0,0.6); ";
     }
 
     private String getLightThemeVars() {
-        return "-theme-bg: #F0F2F5; -theme-panel: #FFFFFF; -theme-text: #1C1E21; " +
-                "-theme-muted: #606770; -theme-border: #DDDFE2; -theme-accent: #E4770B; " +
-                "-theme-shadow: rgba(0,0,0,0.1); ";
+        return "-theme-bg: rgba(240, 242, 245, 0.85); " +
+                "-theme-panel: rgba(255, 255, 255, 0.95); " +
+                "-theme-text: #1C1E21; " +
+                "-theme-muted: #606770; " +
+                "-theme-border: #DDDFE2; " +
+                "-theme-accent: #E4770B; " +
+                "-theme-shadow: rgba(0,0,0,0.15); ";
     }
 
     private String getActiveThemeVars() {
@@ -242,7 +268,7 @@ public class SkillMatrixApp extends Application {
 
     private HBox createHeader() {
         HBox header = new HBox(15);
-        header.setPadding(new Insets(15, 30, 15, 30));
+        header.setPadding(new Insets(12, 20, 12, 20));
         header.setStyle(
                 "-fx-background-color: -theme-panel; -fx-effect: dropshadow(gaussian, -theme-shadow, 10, 0, 0, 2);");
         header.setAlignment(Pos.CENTER_LEFT);
@@ -250,16 +276,15 @@ public class SkillMatrixApp extends Application {
         try {
             Image logoImage = new Image("file:TE_Connectivity_logo.png");
             ImageView logoView = new ImageView(logoImage);
-            logoView.setFitHeight(45);
+            logoView.setFitHeight(40);
             logoView.setPreserveRatio(true);
             header.getChildren().add(logoView);
         } catch (Exception e) {
             Label fallbackLabel = new Label("TE SKILL MATRIX");
-            fallbackLabel.setStyle("-fx-text-fill: -theme-accent; -fx-font-size: 22px; -fx-font-weight: bold;");
+            fallbackLabel.setStyle("-fx-text-fill: -theme-accent; -fx-font-size: 20px; -fx-font-weight: bold;");
             header.getChildren().add(fallbackLabel);
         }
 
-        // Active Session User Chip
         userSessionLabel = new Label("👤 " + currentUser + " (" + userRole + ")");
         userSessionLabel.setStyle(
                 "-fx-text-fill: -theme-text; -fx-font-weight: bold; -fx-background-color: -theme-border; -fx-padding: 6 12; -fx-background-radius: 15;");
@@ -272,7 +297,6 @@ public class SkillMatrixApp extends Application {
         Region spacer = new Region();
         HBox.setHgrow(spacer, Priority.ALWAYS);
 
-        // Theme Toggle Button
         themeBtn = new Button();
         themeBtn.setStyle(
                 "-fx-background-color: transparent; -fx-text-fill: -theme-text; -fx-cursor: hand; -fx-font-size: 14px; -fx-border-color: -theme-border; -fx-border-radius: 4;");
@@ -280,11 +304,10 @@ public class SkillMatrixApp extends Application {
             isDarkMode = !isDarkMode;
             applyTheme();
         });
-        applyTheme();
 
         HBox searchBox = new HBox(10);
         searchBox.setAlignment(Pos.CENTER);
-        searchBox.setStyle("-fx-background-color: -theme-border; -fx-padding: 10; -fx-background-radius: 8;");
+        searchBox.setStyle("-fx-background-color: -theme-border; -fx-padding: 8; -fx-background-radius: 8;");
 
         Button addEmpBtn = new Button("+ Employee");
         addEmpBtn.setStyle(
@@ -321,7 +344,7 @@ public class SkillMatrixApp extends Application {
 
         searchField = new TextField();
         searchField.setPromptText("Search anything...");
-        searchField.setPrefWidth(200);
+        searchField.setPrefWidth(180);
         searchField.setStyle(
                 "-fx-control-inner-background: -theme-bg; -fx-text-fill: -theme-text; -fx-prompt-text-fill: -theme-muted; -fx-background-radius: 4; -fx-padding: 6;");
 
@@ -367,8 +390,6 @@ public class SkillMatrixApp extends Application {
         employeeTable = new TableView<>();
         employeeData = FXCollections.observableArrayList();
         employeeTable.setItems(employeeData);
-        employeeTable.setStyle(
-                "-fx-base: -theme-panel; -fx-control-inner-background: -theme-panel; -fx-background-color: -theme-panel; -fx-table-cell-border-color: -theme-border; -fx-table-header-border-color: -theme-border; -fx-text-background-color: -theme-text;");
         VBox.setVgrow(employeeTable, Priority.ALWAYS);
 
         TableColumn<EmployeeRecord, String> idCol = new TableColumn<>("ID");
@@ -396,13 +417,13 @@ public class SkillMatrixApp extends Application {
     }
 
     private VBox createDetailPanel() {
-        VBox panel = new VBox(20);
-        panel.setPadding(new Insets(0, 0, 0, 10));
+        VBox panel = new VBox(15);
+        panel.setPadding(new Insets(0, 0, 0, 5));
 
-        VBox profileBox = new VBox(15);
+        VBox profileBox = new VBox(10);
         profileBox.setStyle(
                 "-fx-background-color: -theme-panel; -fx-background-radius: 8; -fx-effect: dropshadow(gaussian, -theme-shadow, 10, 0, 0, 3);");
-        profileBox.setPadding(new Insets(0, 0, 20, 0));
+        profileBox.setPadding(new Insets(0, 0, 15, 0));
 
         Label profileHeader = new Label("EMPLOYEE PROFILE");
         profileHeader.setFont(Font.font("Arial", FontWeight.BOLD, 14));
@@ -414,15 +435,15 @@ public class SkillMatrixApp extends Application {
         profileInfo.setPadding(new Insets(10, 20, 0, 20));
 
         StackPane avatarPane = new StackPane();
-        Circle avatar = new Circle(35, Color.web("#E4770B"));
+        Circle avatar = new Circle(32, Color.web("#E4770B"));
         Text avatarText = new Text("ID");
-        avatarText.setFont(Font.font("Arial", FontWeight.BOLD, 20));
+        avatarText.setFont(Font.font("Arial", FontWeight.BOLD, 18));
         avatarText.setFill(Color.WHITE);
         avatarPane.getChildren().addAll(avatar, avatarText);
 
         GridPane grid = new GridPane();
-        grid.setVgap(10);
-        grid.setHgap(15);
+        grid.setVgap(8);
+        grid.setHgap(12);
 
         idValue = createDataLabel("");
         nameValue = createDataLabel("");
@@ -451,8 +472,6 @@ public class SkillMatrixApp extends Application {
         skillsTable = new TableView<>();
         skillsData = FXCollections.observableArrayList();
         skillsTable.setItems(skillsData);
-        skillsTable.setStyle(
-                "-fx-base: -theme-panel; -fx-control-inner-background: -theme-panel; -fx-background-color: -theme-panel; -fx-table-cell-border-color: -theme-border; -fx-table-header-border-color: -theme-border; -fx-text-background-color: -theme-text;");
         VBox.setVgrow(skillsTable, Priority.ALWAYS);
 
         TableColumn<SkillRecord, String> lineCol = new TableColumn<>("Line Number");
@@ -491,7 +510,7 @@ public class SkillMatrixApp extends Application {
     private HBox createFooter() {
         HBox footer = new HBox();
         footer.setStyle(
-                "-fx-background-color: -theme-bg; -fx-padding: 5 15; -fx-border-color: -theme-border; -fx-border-width: 1 0 0 0;");
+                "-fx-background-color: -theme-panel; -fx-padding: 5 15; -fx-border-color: -theme-border; -fx-border-width: 1 0 0 0;");
         statusLabel = new Label("Database Connected: " + DB_URL + " | Active User: " + currentUser);
         statusLabel.setFont(Font.font("Arial", 12));
         statusLabel.setStyle("-fx-text-fill: -theme-muted;");
@@ -553,7 +572,6 @@ public class SkillMatrixApp extends Application {
         logTable.getColumns().addAll(List.of(timeCol, userCol, typeCol, descCol));
         logTable.setItems(logData);
 
-        // Query Logs from DB
         String sql = "SELECT timestamp, user_id, action_type, description FROM AuditLogs ORDER BY log_id DESC";
         try (Connection conn = DriverManager.getConnection(DB_URL);
                 Statement stmt = conn.createStatement();
