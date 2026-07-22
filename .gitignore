@@ -2,6 +2,7 @@
 *.db
 *.sqlite
 *.db-journal
+*.xlsx
 
 # Compiled Java outputs
 *.class
