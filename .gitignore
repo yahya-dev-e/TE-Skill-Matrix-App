@@ -1,0 +1,15 @@
+# Databases & Private Data
+*.db
+*.sqlite
+*.db-journal
+
+# Compiled Java outputs
+*.class
+bin/
+
+# Environment / IDE files
+.vscode/
+
+# Build outputs
+*.jar
+*.exe
