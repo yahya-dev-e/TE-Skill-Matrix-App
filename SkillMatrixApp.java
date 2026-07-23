@@ -309,15 +309,26 @@ public class SkillMatrixApp extends Application {
         searchBox.setAlignment(Pos.CENTER);
         searchBox.setStyle("-fx-background-color: -theme-border; -fx-padding: 8; -fx-background-radius: 8;");
 
-        Button addEmpBtn = new Button("+ Employee");
-        addEmpBtn.setStyle(
-                "-fx-background-color: -theme-bg; -fx-text-fill: -theme-text; -fx-background-radius: 4; -fx-cursor: hand;");
-        addEmpBtn.setOnAction(e -> showAddEmployeeDialog());
+        boolean isAdmin = "ADMIN".equals(userRole);
 
-        Button addSkillBtn = new Button("+ Skill");
-        addSkillBtn.setStyle(
-                "-fx-background-color: -theme-bg; -fx-text-fill: -theme-text; -fx-background-radius: 4; -fx-cursor: hand;");
-        addSkillBtn.setOnAction(e -> showAddSkillDialog());
+        if (isAdmin) {
+            Button addEmpBtn = new Button("+ Employee");
+            addEmpBtn.setStyle(
+                    "-fx-background-color: -theme-bg; -fx-text-fill: -theme-text; -fx-background-radius: 4; -fx-cursor: hand;");
+            addEmpBtn.setOnAction(e -> showAddEmployeeDialog());
+
+            Button removeEmpBtn = new Button("- Employee");
+            removeEmpBtn.setStyle(
+                    "-fx-background-color: -theme-bg; -fx-text-fill: #e53935; -fx-background-radius: 4; -fx-cursor: hand; -fx-font-weight: bold;");
+            removeEmpBtn.setOnAction(e -> handleRemoveSelectedEmployee());
+
+            Button addSkillBtn = new Button("+ Skill");
+            addSkillBtn.setStyle(
+                    "-fx-background-color: -theme-bg; -fx-text-fill: -theme-text; -fx-background-radius: 4; -fx-cursor: hand;");
+            addSkillBtn.setOnAction(e -> showAddSkillDialog());
+
+            searchBox.getChildren().addAll(addEmpBtn, removeEmpBtn, addSkillBtn);
+        }
 
         searchCategoryCombo = new ComboBox<>();
         searchCategoryCombo.getItems().addAll("All Fields", "Employee ID", "Name", "Area", "Team Leader", "Line Number",
@@ -362,7 +373,7 @@ public class SkillMatrixApp extends Application {
         clearBtn.setStyle(
                 "-fx-background-color: -theme-bg; -fx-text-fill: -theme-text; -fx-background-radius: 4; -fx-cursor: hand;");
 
-        searchBox.getChildren().addAll(addEmpBtn, addSkillBtn, searchCategoryCombo, searchField, searchBtn, clearBtn);
+        searchBox.getChildren().addAll(searchCategoryCombo, searchField, searchBtn, clearBtn);
         header.getChildren().addAll(userSessionLabel, logsBtn, themeBtn, spacer, searchBox);
 
         searchBtn.setOnAction(e -> executeSearch());
@@ -412,6 +423,14 @@ public class SkillMatrixApp extends Application {
                 loadEmployeeDetails(newSelection);
         });
 
+        if ("ADMIN".equals(userRole)) {
+            ContextMenu cm = new ContextMenu();
+            MenuItem removeItem = new MenuItem("🗑️ Remove Selected Employee");
+            removeItem.setOnAction(e -> handleRemoveSelectedEmployee());
+            cm.getItems().add(removeItem);
+            employeeTable.setContextMenu(cm);
+        }
+
         panel.getChildren().addAll(headerLabel, employeeTable);
         return panel;
     }
@@ -425,11 +444,27 @@ public class SkillMatrixApp extends Application {
                 "-fx-background-color: -theme-panel; -fx-background-radius: 8; -fx-effect: dropshadow(gaussian, -theme-shadow, 10, 0, 0, 3);");
         profileBox.setPadding(new Insets(0, 0, 15, 0));
 
+        HBox profileHeaderBox = new HBox();
+        profileHeaderBox.setAlignment(Pos.CENTER_LEFT);
+        profileHeaderBox.setStyle(
+                "-fx-background-color: -theme-border; -fx-padding: 10 15; -fx-background-radius: 8 8 0 0; -fx-border-color: -theme-accent; -fx-border-width: 0 0 2 0;");
+
         Label profileHeader = new Label("EMPLOYEE PROFILE");
         profileHeader.setFont(Font.font("Arial", FontWeight.BOLD, 14));
-        profileHeader.setStyle(
-                "-fx-background-color: -theme-border; -fx-padding: 10 15; -fx-background-radius: 8 8 0 0; -fx-border-color: -theme-accent; -fx-border-width: 0 0 2 0; -fx-text-fill: -theme-text;");
-        profileHeader.setMaxWidth(Double.MAX_VALUE);
+        profileHeader.setStyle("-fx-text-fill: -theme-text;");
+
+        Region profileSpacer = new Region();
+        HBox.setHgrow(profileSpacer, Priority.ALWAYS);
+
+        profileHeaderBox.getChildren().addAll(profileHeader, profileSpacer);
+
+        if ("ADMIN".equals(userRole)) {
+            Button removeProfileBtn = new Button("🗑️ Remove");
+            removeProfileBtn.setStyle(
+                    "-fx-background-color: #e53935; -fx-text-fill: white; -fx-font-weight: bold; -fx-font-size: 11px; -fx-background-radius: 4; -fx-cursor: hand;");
+            removeProfileBtn.setOnAction(e -> handleRemoveSelectedEmployee());
+            profileHeaderBox.getChildren().add(removeProfileBtn);
+        }
 
         HBox profileInfo = new HBox(20);
         profileInfo.setPadding(new Insets(10, 20, 0, 20));
@@ -456,7 +491,7 @@ public class SkillMatrixApp extends Application {
         grid.addRow(2, createTitleLabel("Team Leader"), leaderValue);
 
         profileInfo.getChildren().addAll(avatarPane, grid);
-        profileBox.getChildren().addAll(profileHeader, profileInfo);
+        profileBox.getChildren().addAll(profileHeaderBox, profileInfo);
 
         VBox skillsBox = new VBox();
         skillsBox.setStyle(
@@ -598,10 +633,115 @@ public class SkillMatrixApp extends Application {
     }
 
     // ==========================================
-    // DATA ENTRY DIALOGS
+    // DATA ENTRY & REMOVAL DIALOGS
     // ==========================================
 
+    private void handleRemoveSelectedEmployee() {
+        if (!"ADMIN".equals(userRole)) {
+            showAlert("Access Denied", "Only administrators can remove employees.");
+            return;
+        }
+
+        EmployeeRecord selected = employeeTable.getSelectionModel().getSelectedItem();
+        if (selected == null) {
+            showAlert("No Employee Selected", "Please select an employee from the table first to remove.");
+            return;
+        }
+
+        // Security Password Verification Dialog
+        Dialog<String> passwordDialog = new Dialog<>();
+        passwordDialog.setTitle("Security Check - Delete Employee");
+        passwordDialog.setHeaderText("⚠️ CAUTION: Deleting " + selected.getName() + " (" + selected.getId() + ")");
+
+        ButtonType confirmButtonType = new ButtonType("Confirm Delete", ButtonBar.ButtonData.OK_DONE);
+        passwordDialog.getDialogPane().getButtonTypes().addAll(confirmButtonType, ButtonType.CANCEL);
+
+        GridPane grid = new GridPane();
+        grid.setHgap(10);
+        grid.setVgap(10);
+        grid.setPadding(new Insets(20, 20, 10, 10));
+
+        Label warningLabel = new Label(
+                "This action is permanent and will remove all associated qualifications.\nTo proceed, please enter the Admin Password:");
+        warningLabel.setWrapText(true);
+
+        PasswordField passwordInput = new PasswordField();
+        passwordInput.setPromptText("Admin Password");
+
+        grid.add(warningLabel, 0, 0, 2, 1);
+        grid.add(new Label("Password:"), 0, 1);
+        grid.add(passwordInput, 1, 1);
+
+        passwordDialog.getDialogPane().setContent(grid);
+
+        passwordDialog.setResultConverter(dialogButton -> {
+            if (dialogButton == confirmButtonType) {
+                return passwordInput.getText().trim();
+            }
+            return null;
+        });
+
+        Optional<String> result = passwordDialog.showAndWait();
+        if (result.isPresent()) {
+            String enteredPassword = result.get();
+            if ("admin123".equals(enteredPassword)) {
+                deleteEmployeeFromDatabase(selected.getId(), selected.getName());
+            } else {
+                showAlert("Authentication Failed", "Incorrect admin password. Employee deletion cancelled.");
+            }
+        }
+    }
+
+    private void deleteEmployeeFromDatabase(String empId, String empName) {
+        String deleteQualificationsSql = "DELETE FROM Qualifications WHERE employee_id = ?";
+        String deleteEmployeeSql = "DELETE FROM Employees WHERE id = ?";
+
+        try (Connection conn = DriverManager.getConnection(DB_URL)) {
+            conn.setAutoCommit(false);
+
+            try (PreparedStatement pstmtQual = conn.prepareStatement(deleteQualificationsSql);
+                    PreparedStatement pstmtEmp = conn.prepareStatement(deleteEmployeeSql)) {
+
+                pstmtQual.setString(1, empId);
+                pstmtQual.executeUpdate();
+
+                pstmtEmp.setString(1, empId);
+                int rows = pstmtEmp.executeUpdate();
+
+                conn.commit();
+
+                if (rows > 0) {
+                    logAction("DELETE_EMPLOYEE", "Removed employee ID: " + empId + " (" + empName + ")");
+                    statusLabel.setText("✅ Successfully removed employee: " + empId);
+
+                    // Clear profile & skills detail view
+                    idValue.setText("");
+                    nameValue.setText("");
+                    dateValue.setText("");
+                    areaValue.setText("");
+                    leaderValue.setText("");
+                    skillsData.clear();
+
+                    // Refresh master list
+                    executeSearch();
+                } else {
+                    showAlert("Delete Failed", "No record found for employee ID: " + empId);
+                }
+            } catch (SQLException ex) {
+                conn.rollback();
+                showAlert("Database Error", "Failed to remove employee.\n\n" + ex.getMessage());
+            }
+        } catch (SQLException ex) {
+            showAlert("Database Error", "Database connection error.\n\n" + ex.getMessage());
+        }
+    }
+
     private void showAddEmployeeDialog() {
+        if (!"ADMIN".equals(userRole)) {
+            showAlert("Access Denied", "Only administrators can add new employees.");
+            return;
+        }
+
         Stage dialog = new Stage();
         dialog.initModality(Modality.APPLICATION_MODAL);
         dialog.setTitle("Add New Employee");
@@ -666,6 +806,11 @@ public class SkillMatrixApp extends Application {
     }
 
     private void showAddSkillDialog() {
+        if (!"ADMIN".equals(userRole)) {
+            showAlert("Access Denied", "Only administrators can add new qualifications.");
+            return;
+        }
+
         Stage dialog = new Stage();
         dialog.initModality(Modality.APPLICATION_MODAL);
         dialog.setTitle("Add Qualification");
