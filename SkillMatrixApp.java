@@ -21,49 +21,42 @@ import javafx.stage.FileChooser;
 
 import java.awt.Desktop;
 import java.io.File;
-import java.sql.*;
-import java.time.LocalDateTime;
-import java.time.format.DateTimeFormatter;
+import java.sql.SQLException;
 import java.util.List;
 import java.util.Optional;
 
 public class SkillMatrixApp extends Application {
 
-    private static final String DB_URL = "jdbc:sqlite:master_skills_data_clean2.db";
+    private final DatabaseManager dbManager = new DatabaseManager();
 
-    // User Session State
+    // Session State
     private String currentUser = null;
     private String userRole = null;
-
-    // App State
     private boolean isDarkMode = false;
+
+    // UI Structure
     private BorderPane root;
     private Button themeBtn;
-
-    // UI Components
     private TextField searchField;
     private ComboBox<String> searchCategoryCombo;
     private Label idValue, nameValue, dateValue, areaValue, leaderValue, statusLabel, userSessionLabel;
     private Text avatarText;
 
-    // Master View (Left)
+    // Tables
     private TableView<EmployeeRecord> employeeTable;
     private ObservableList<EmployeeRecord> employeeData;
-
-    // Detail View (Right)
     private TableView<SkillRecord> skillsTable;
     private ObservableList<SkillRecord> skillsData;
 
     @Override
     public void start(Stage primaryStage) {
-        ensureDatabaseSchema();
-
         if (!showLoginDialog()) {
             System.exit(0);
             return;
         }
 
         root = new BorderPane();
+        root.getStyleClass().add("root-container");
 
         SplitPane splitPane = new SplitPane();
         splitPane.setStyle("-fx-background-color: transparent; -fx-padding: 15;");
@@ -78,63 +71,32 @@ public class SkillMatrixApp extends Application {
         root.setCenter(splitPane);
         root.setBottom(createFooter());
 
+        Scene scene = new Scene(root, 1200, 800);
+        try {
+            scene.getStylesheets().add(getClass().getResource("styles.css").toExternalForm());
+        } catch (Exception e) {
+            System.err.println("[CSS] Failed to load external stylesheet: " + e.getMessage());
+        }
+
         applyTheme();
 
-        Scene scene = new Scene(root, 1200, 800);
         primaryStage.setTitle("TE Connectivity - Skill Matrix System");
         primaryStage.setScene(scene);
         primaryStage.setMaximized(true);
         primaryStage.show();
 
-        logAction("SYSTEM", "User logged in into application session");
+        dbManager.logAction(currentUser, "SYSTEM", "User logged into session");
         executeSearch();
     }
 
-    private void ensureDatabaseSchema() {
-        try (Connection conn = DriverManager.getConnection(DB_URL);
-                Statement stmt = conn.createStatement()) {
-
-            try {
-                stmt.execute("ALTER TABLE Qualifications ADD COLUMN cert_path TEXT");
-            } catch (SQLException ignored) {
-            }
-
-            String createLogTable = "CREATE TABLE IF NOT EXISTS AuditLogs (" +
-                    "log_id INTEGER PRIMARY KEY AUTOINCREMENT, " +
-                    "timestamp TEXT NOT NULL, " +
-                    "user_id TEXT NOT NULL, " +
-                    "action_type TEXT NOT NULL, " +
-                    "description TEXT NOT NULL" +
-                    ");";
-            stmt.execute(createLogTable);
-
-        } catch (SQLException e) {
-            showAlert("Database Initialization Error", "Could not verify/update database schema:\n" + e.getMessage());
-        }
-    }
-
-    private void logAction(String actionType, String description) {
-        String sql = "INSERT INTO AuditLogs (timestamp, user_id, action_type, description) VALUES (?, ?, ?, ?)";
-        String timestamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
-
-        try (Connection conn = DriverManager.getConnection(DB_URL);
-                PreparedStatement pstmt = conn.prepareStatement(sql)) {
-
-            pstmt.setString(1, timestamp);
-            pstmt.setString(2, currentUser != null ? currentUser : "UNKNOWN");
-            pstmt.setString(3, actionType);
-            pstmt.setString(4, description);
-            pstmt.executeUpdate();
-
-        } catch (SQLException e) {
-            System.err.println("Failed to write to Audit Log: " + e.getMessage());
-        }
-    }
+    // ==========================================
+    // USER AUTHENTICATION DIALOG
+    // ==========================================
 
     private boolean showLoginDialog() {
         Dialog<Boolean> loginDialog = new Dialog<>();
         loginDialog.setTitle("TE Skill Matrix - Authentication");
-        loginDialog.setHeaderText("Please log in to continue");
+        loginDialog.setHeaderText("Please sign in with your credentials");
 
         ButtonType loginButtonType = new ButtonType("Login", ButtonBar.ButtonData.OK_DONE);
         loginDialog.getDialogPane().getButtonTypes().addAll(loginButtonType, ButtonType.CANCEL);
@@ -145,7 +107,7 @@ public class SkillMatrixApp extends Application {
         grid.setPadding(new Insets(20, 150, 10, 10));
 
         TextField username = new TextField();
-        username.setPromptText("Username (e.g. admin or operator)");
+        username.setPromptText("Username");
         PasswordField password = new PasswordField();
         password.setPromptText("Password");
 
@@ -158,19 +120,19 @@ public class SkillMatrixApp extends Application {
 
         loginDialog.setResultConverter(dialogButton -> {
             if (dialogButton == loginButtonType) {
-                String u = username.getText().trim();
-                String p = password.getText().trim();
-
-                if (u.equalsIgnoreCase("admin") && p.equals("admin123")) {
-                    currentUser = "ADMIN_" + u.toUpperCase();
-                    userRole = "ADMIN";
-                    return true;
-                } else if (!u.isEmpty() && p.equals("user123")) {
-                    currentUser = u.toUpperCase();
-                    userRole = "OPERATOR";
-                    return true;
-                } else {
-                    return false;
+                try {
+                    DatabaseManager.UserSession session = dbManager.authenticate(username.getText(),
+                            password.getText());
+                    if (session != null) {
+                        currentUser = session.getUsername();
+                        userRole = session.getRole();
+                        return true;
+                    }
+                } catch (SQLException e) {
+                    System.err.println("[Auth Error] " + e.getMessage());
+                    e.printStackTrace();
+                    showFriendlyError("Authentication Error",
+                            "Unable to complete login due to a system service issue. Please try again later.");
                 }
             }
             return false;
@@ -179,53 +141,46 @@ public class SkillMatrixApp extends Application {
         Optional<Boolean> result = loginDialog.showAndWait();
         if (result.isPresent() && result.get()) {
             return true;
-        } else if (result.isPresent() && !result.get()) {
-            showAlert("Access Denied", "Invalid username or password.");
+        } else if (result.isPresent()) {
+            showFriendlyError("Access Denied", "Invalid username or password. Please verify your credentials.");
             return showLoginDialog();
         }
         return false;
     }
 
-    private void applyTheme() {
-        String bgImage = isDarkMode ? "Dark_mode_bg.png" : "Light_mode_bg.png";
+    // ==========================================
+    // THEMING
+    // ==========================================
 
-        root.setStyle(getActiveThemeVars()
-                + "-fx-background-image: url('file:" + bgImage + "'); "
-                + "-fx-background-size: cover; "
-                + "-fx-background-position: center center; "
-                + "-fx-font-family: 'Segoe UI', Arial, sans-serif;");
+    private void applyTheme() {
+        root.getStyleClass().removeAll("theme-dark", "theme-light");
+        root.getStyleClass().add(isDarkMode ? "theme-dark" : "theme-light");
+
+        String bgImage = isDarkMode ? "Dark_mode_bg.png" : "Light_mode_bg.png";
+        root.setStyle("-fx-background-image: url('file:" + bgImage + "');");
 
         if (themeBtn != null) {
             themeBtn.setText(isDarkMode ? "☀️ Light" : "🌙 Dark");
         }
 
-        String tableStyle = isDarkMode
-                ? "-fx-base: #1E1E1E; -fx-control-inner-background: #252525; -fx-background-color: #1E1E1E; -fx-table-cell-border-color: #333333; -fx-table-header-border-color: #333333; -fx-text-background-color: #FFFFFF;"
-                : "-fx-base: #FFFFFF; -fx-control-inner-background: #FFFFFF; -fx-background-color: #FFFFFF; -fx-table-cell-border-color: #E0E0E0; -fx-table-header-border-color: #E0E0E0; -fx-text-background-color: #1C1E21;";
+        if (employeeTable != null && skillsTable != null) {
+            employeeTable.getStyleClass().removeAll("table-dark", "table-light");
+            skillsTable.getStyleClass().removeAll("table-dark", "table-light");
 
-        if (employeeTable != null)
-            employeeTable.setStyle(tableStyle);
-        if (skillsTable != null)
-            skillsTable.setStyle(tableStyle);
+            String tableClass = isDarkMode ? "table-dark" : "table-light";
+            employeeTable.getStyleClass().add(tableClass);
+            skillsTable.getStyleClass().add(tableClass);
+        }
     }
 
-    private String getDarkThemeVars() {
-        return "-theme-bg: rgba(18, 18, 18, 0.85); -theme-panel: rgba(30, 30, 30, 0.95); -theme-text: #FFFFFF; -theme-muted: #B0B0B0; -theme-border: #333333; -theme-accent: #E4770B; -theme-shadow: rgba(0,0,0,0.6); ";
-    }
-
-    private String getLightThemeVars() {
-        return "-theme-bg: rgba(240, 242, 245, 0.85); -theme-panel: rgba(255, 255, 255, 0.95); -theme-text: #1C1E21; -theme-muted: #606770; -theme-border: #DDDFE2; -theme-accent: #E4770B; -theme-shadow: rgba(0,0,0,0.15); ";
-    }
-
-    private String getActiveThemeVars() {
-        return isDarkMode ? getDarkThemeVars() : getLightThemeVars();
-    }
+    // ==========================================
+    // UI BUILDER METHODS
+    // ==========================================
 
     private HBox createHeader() {
         HBox header = new HBox(15);
         header.setPadding(new Insets(12, 20, 12, 20));
-        header.setStyle(
-                "-fx-background-color: -theme-panel; -fx-effect: dropshadow(gaussian, -theme-shadow, 10, 0, 0, 2);");
+        header.getStyleClass().add("header-bar");
         header.setAlignment(Pos.CENTER_LEFT);
 
         try {
@@ -236,25 +191,22 @@ public class SkillMatrixApp extends Application {
             header.getChildren().add(logoView);
         } catch (Exception e) {
             Label fallbackLabel = new Label("TE SKILL MATRIX");
-            fallbackLabel.setStyle("-fx-text-fill: -theme-accent; -fx-font-size: 20px; -fx-font-weight: bold;");
+            fallbackLabel.getStyleClass().add("panel-header-label");
             header.getChildren().add(fallbackLabel);
         }
 
         userSessionLabel = new Label("👤 " + currentUser + " (" + userRole + ")");
-        userSessionLabel.setStyle(
-                "-fx-text-fill: -theme-text; -fx-font-weight: bold; -fx-background-color: -theme-border; -fx-padding: 6 12; -fx-background-radius: 15;");
+        userSessionLabel.getStyleClass().add("user-badge");
 
         Button logsBtn = new Button("📜 Logs");
-        logsBtn.setStyle(
-                "-fx-background-color: -theme-bg; -fx-text-fill: -theme-text; -fx-border-color: -theme-border; -fx-border-radius: 4; -fx-cursor: hand;");
+        logsBtn.getStyleClass().add("btn-secondary");
         logsBtn.setOnAction(e -> showAuditLogsDialog());
 
         Region spacer = new Region();
         HBox.setHgrow(spacer, Priority.ALWAYS);
 
         themeBtn = new Button();
-        themeBtn.setStyle(
-                "-fx-background-color: transparent; -fx-text-fill: -theme-text; -fx-cursor: hand; -fx-font-size: 14px; -fx-border-color: -theme-border; -fx-border-radius: 4;");
+        themeBtn.getStyleClass().add("btn-secondary");
         themeBtn.setOnAction(e -> {
             isDarkMode = !isDarkMode;
             applyTheme();
@@ -262,22 +214,19 @@ public class SkillMatrixApp extends Application {
 
         HBox searchBox = new HBox(8);
         searchBox.setAlignment(Pos.CENTER);
-        searchBox.setStyle("-fx-background-color: -theme-border; -fx-padding: 8; -fx-background-radius: 8;");
+        searchBox.getStyleClass().add("search-box-container");
 
         if ("ADMIN".equals(userRole)) {
             Button addEmpBtn = new Button("+ Employee");
-            addEmpBtn.setStyle(
-                    "-fx-background-color: -theme-bg; -fx-text-fill: -theme-text; -fx-background-radius: 4; -fx-cursor: hand;");
+            addEmpBtn.getStyleClass().add("btn-secondary");
             addEmpBtn.setOnAction(e -> showAddEmployeeDialog());
 
             Button removeEmpBtn = new Button("- Employee");
-            removeEmpBtn.setStyle(
-                    "-fx-background-color: -theme-bg; -fx-text-fill: #e53935; -fx-background-radius: 4; -fx-cursor: hand; -fx-font-weight: bold;");
+            removeEmpBtn.getStyleClass().add("btn-danger");
             removeEmpBtn.setOnAction(e -> handleRemoveSelectedEmployee());
 
             Button addSkillBtn = new Button("+ Skill");
-            addSkillBtn.setStyle(
-                    "-fx-background-color: -theme-bg; -fx-text-fill: -theme-text; -fx-background-radius: 4; -fx-cursor: hand;");
+            addSkillBtn.getStyleClass().add("btn-secondary");
             addSkillBtn.setOnAction(e -> showAddSkillDialog());
 
             searchBox.getChildren().addAll(addEmpBtn, removeEmpBtn, addSkillBtn);
@@ -287,21 +236,18 @@ public class SkillMatrixApp extends Application {
         searchCategoryCombo.getItems().addAll("All Fields", "Employee ID", "Name", "Area", "Team Leader", "Line Number",
                 "Station", "Skill Level");
         searchCategoryCombo.setValue("All Fields");
-        searchCategoryCombo.setStyle("-fx-background-color: -theme-bg; -fx-background-radius: 4;");
+        searchCategoryCombo.getStyleClass().add("btn-secondary");
 
         searchField = new TextField();
         searchField.setPromptText("Search anything...");
         searchField.setPrefWidth(160);
-        searchField.setStyle(
-                "-fx-control-inner-background: -theme-bg; -fx-text-fill: -theme-text; -fx-prompt-text-fill: -theme-muted; -fx-background-radius: 4; -fx-padding: 6;");
+        searchField.getStyleClass().add("input-field");
 
         Button searchBtn = new Button("Search");
-        searchBtn.setStyle(
-                "-fx-background-color: -theme-accent; -fx-text-fill: white; -fx-font-weight: bold; -fx-background-radius: 4; -fx-cursor: hand;");
+        searchBtn.getStyleClass().add("btn-primary");
 
         Button clearBtn = new Button("Clear");
-        clearBtn.setStyle(
-                "-fx-background-color: -theme-bg; -fx-text-fill: -theme-text; -fx-background-radius: 4; -fx-cursor: hand;");
+        clearBtn.getStyleClass().add("btn-secondary");
 
         searchBox.getChildren().addAll(searchCategoryCombo, searchField, searchBtn, clearBtn);
         header.getChildren().addAll(userSessionLabel, logsBtn, themeBtn, spacer, searchBox);
@@ -319,13 +265,10 @@ public class SkillMatrixApp extends Application {
 
     private VBox createMasterPanel() {
         VBox panel = new VBox();
-        panel.setStyle(
-                "-fx-background-color: -theme-panel; -fx-background-radius: 8; -fx-effect: dropshadow(gaussian, -theme-shadow, 10, 0, 0, 3);");
+        panel.getStyleClass().add("card-panel");
 
         Label headerLabel = new Label("SEARCH RESULTS");
-        headerLabel.setFont(Font.font("Arial", FontWeight.BOLD, 14));
-        headerLabel.setStyle(
-                "-fx-background-color: -theme-border; -fx-padding: 10 15; -fx-background-radius: 8 8 0 0; -fx-border-color: -theme-accent; -fx-border-width: 0 0 2 0; -fx-text-fill: -theme-text;");
+        headerLabel.getStyleClass().add("panel-header-label");
         headerLabel.setMaxWidth(Double.MAX_VALUE);
 
         employeeTable = new TableView<>();
@@ -335,15 +278,12 @@ public class SkillMatrixApp extends Application {
 
         TableColumn<EmployeeRecord, String> idCol = new TableColumn<>("ID");
         idCol.setCellValueFactory(new PropertyValueFactory<>("id"));
-        idCol.setPrefWidth(90);
 
         TableColumn<EmployeeRecord, String> nameCol = new TableColumn<>("Name");
         nameCol.setCellValueFactory(new PropertyValueFactory<>("name"));
-        nameCol.setPrefWidth(150);
 
         TableColumn<EmployeeRecord, String> areaCol = new TableColumn<>("Area");
         areaCol.setCellValueFactory(new PropertyValueFactory<>("area"));
-        areaCol.setPrefWidth(120);
 
         employeeTable.getColumns().addAll(List.of(idCol, nameCol, areaCol));
         employeeTable.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY_FLEX_LAST_COLUMN);
@@ -370,18 +310,15 @@ public class SkillMatrixApp extends Application {
         panel.setPadding(new Insets(0, 0, 0, 5));
 
         VBox profileBox = new VBox(10);
-        profileBox.setStyle(
-                "-fx-background-color: -theme-panel; -fx-background-radius: 8; -fx-effect: dropshadow(gaussian, -theme-shadow, 10, 0, 0, 3);");
+        profileBox.getStyleClass().add("card-panel");
         profileBox.setPadding(new Insets(0, 0, 15, 0));
 
         HBox profileHeaderBox = new HBox();
         profileHeaderBox.setAlignment(Pos.CENTER_LEFT);
-        profileHeaderBox.setStyle(
-                "-fx-background-color: -theme-border; -fx-padding: 10 15; -fx-background-radius: 8 8 0 0; -fx-border-color: -theme-accent; -fx-border-width: 0 0 2 0;");
+        profileHeaderBox.getStyleClass().add("panel-header-label");
 
         Label profileHeader = new Label("EMPLOYEE PROFILE");
         profileHeader.setFont(Font.font("Arial", FontWeight.BOLD, 14));
-        profileHeader.setStyle("-fx-text-fill: -theme-text;");
 
         Region profileSpacer = new Region();
         HBox.setHgrow(profileSpacer, Priority.ALWAYS);
@@ -390,8 +327,7 @@ public class SkillMatrixApp extends Application {
 
         if ("ADMIN".equals(userRole)) {
             Button removeProfileBtn = new Button("🗑️ Remove");
-            removeProfileBtn.setStyle(
-                    "-fx-background-color: #e53935; -fx-text-fill: white; -fx-font-weight: bold; -fx-font-size: 11px; -fx-background-radius: 4; -fx-cursor: hand;");
+            removeProfileBtn.getStyleClass().add("btn-danger");
             removeProfileBtn.setOnAction(e -> handleRemoveSelectedEmployee());
             profileHeaderBox.getChildren().add(removeProfileBtn);
         }
@@ -424,14 +360,11 @@ public class SkillMatrixApp extends Application {
         profileBox.getChildren().addAll(profileHeaderBox, profileInfo);
 
         VBox skillsBox = new VBox();
-        skillsBox.setStyle(
-                "-fx-background-color: -theme-panel; -fx-background-radius: 8; -fx-effect: dropshadow(gaussian, -theme-shadow, 10, 0, 0, 3);");
+        skillsBox.getStyleClass().add("card-panel");
         VBox.setVgrow(skillsBox, Priority.ALWAYS);
 
         Label skillsHeader = new Label("QUALIFICATIONS & SKILLS (Double-click to open certificate)");
-        skillsHeader.setFont(Font.font("Arial", FontWeight.BOLD, 14));
-        skillsHeader.setStyle(
-                "-fx-background-color: -theme-border; -fx-padding: 10 15; -fx-background-radius: 8 8 0 0; -fx-border-color: -theme-accent; -fx-border-width: 0 0 2 0; -fx-text-fill: -theme-text;");
+        skillsHeader.getStyleClass().add("panel-header-label");
         skillsHeader.setMaxWidth(Double.MAX_VALUE);
 
         skillsTable = new TableView<>();
@@ -441,16 +374,12 @@ public class SkillMatrixApp extends Application {
 
         TableColumn<SkillRecord, String> lineCol = new TableColumn<>("Line Number");
         lineCol.setCellValueFactory(new PropertyValueFactory<>("lineNumber"));
-        lineCol.setPrefWidth(120);
 
         TableColumn<SkillRecord, String> stationCol = new TableColumn<>("Station");
         stationCol.setCellValueFactory(new PropertyValueFactory<>("station"));
-        stationCol.setPrefWidth(220);
 
         TableColumn<SkillRecord, String> levelCol = new TableColumn<>("Skill Level");
         levelCol.setCellValueFactory(new PropertyValueFactory<>("level"));
-        levelCol.setPrefWidth(220);
-        levelCol.setStyle("-fx-font-weight: bold; -fx-text-fill: -theme-accent;");
 
         skillsTable.getColumns().addAll(List.of(lineCol, stationCol, levelCol));
         skillsTable.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY_FLEX_LAST_COLUMN);
@@ -459,8 +388,7 @@ public class SkillMatrixApp extends Application {
             TableRow<SkillRecord> row = new TableRow<>();
             row.setOnMouseClicked(event -> {
                 if (event.getClickCount() == 2 && (!row.isEmpty()) && row.getItem() != null) {
-                    SkillRecord rowData = row.getItem();
-                    openCertificationFile(rowData.getCertPath());
+                    openCertificationFile(row.getItem().getCertPath());
                 }
             });
             return row;
@@ -474,95 +402,82 @@ public class SkillMatrixApp extends Application {
 
     private HBox createFooter() {
         HBox footer = new HBox();
-        footer.setStyle(
-                "-fx-background-color: -theme-panel; -fx-padding: 5 15; -fx-border-color: -theme-border; -fx-border-width: 1 0 0 0;");
-        statusLabel = new Label("Database Connected: " + DB_URL + " | Active User: " + currentUser);
+        footer.getStyleClass().add("header-bar");
+        footer.setPadding(new Insets(5, 15, 5, 15));
+
+        statusLabel = new Label("Database Connected | Active User: " + currentUser);
         statusLabel.setFont(Font.font("Arial", 12));
-        statusLabel.setStyle("-fx-text-fill: -theme-muted;");
         footer.getChildren().add(statusLabel);
         return footer;
     }
 
-    private void openCertificationFile(String path) {
-        if (path == null || path.trim().isEmpty() || path.equalsIgnoreCase("null")) {
-            showAlert("No Certificate", "There is no certification file attached to this skill.");
-            return;
-        }
+    // ==========================================
+    // LOGIC & EVENT HANDLERS
+    // ==========================================
+
+    private void executeSearch() {
+        String keyword = searchField != null ? searchField.getText().trim() : "";
+        String searchType = searchCategoryCombo != null ? searchCategoryCombo.getValue() : "All Fields";
+
+        if (employeeData != null)
+            employeeData.clear();
+        clearProfileFields();
 
         try {
-            File file = new File(path);
-            if (file.exists()) {
-                Desktop.getDesktop().open(file);
-                logAction("VIEW_CERT", "Opened certification document: " + path);
-            } else {
-                showAlert("File Not Found", "Could not find the file at:\n" + path);
+            List<EmployeeRecord> results = dbManager.searchEmployees(keyword, searchType);
+            employeeData.addAll(results);
+
+            if (statusLabel != null) {
+                statusLabel
+                        .setText("✅ Found " + results.size() + " employees matching criteria | Active: " + currentUser);
             }
-        } catch (Exception ex) {
-            showAlert("Error", "Could not open the file.\n" + ex.getMessage());
+            if (employeeTable != null && !employeeData.isEmpty()) {
+                employeeTable.getSelectionModel().selectFirst();
+            }
+        } catch (SQLException e) {
+            System.err.println("[Search Failed] " + e.getMessage());
+            e.printStackTrace();
+            showFriendlyError("Search Error", "Unable to retrieve employee records. Please try refining your query.");
         }
     }
 
-    private void showAuditLogsDialog() {
-        Stage dialog = new Stage();
-        dialog.initModality(Modality.APPLICATION_MODAL);
-        dialog.setTitle("System Audit & Traceability Logs");
+    private void loadEmployeeDetails(EmployeeRecord emp) {
+        if (emp == null)
+            return;
 
-        TableView<LogRecord> logTable = new TableView<>();
-        ObservableList<LogRecord> logData = FXCollections.observableArrayList();
+        idValue.setText(emp.getId());
+        nameValue.setText(emp.getName() != null ? emp.getName().toUpperCase() : "N/A");
+        areaValue.setText(emp.getArea() != null ? emp.getArea().toUpperCase() : "N/A");
+        dateValue.setText(emp.getDate() != null ? emp.getDate() : "N/A");
+        leaderValue.setText(emp.getLeader() != null ? emp.getLeader().toUpperCase() : "N/A");
 
-        TableColumn<LogRecord, String> timeCol = new TableColumn<>("Timestamp");
-        timeCol.setCellValueFactory(new PropertyValueFactory<>("timestamp"));
-        timeCol.setPrefWidth(150);
-
-        TableColumn<LogRecord, String> userCol = new TableColumn<>("User ID");
-        userCol.setCellValueFactory(new PropertyValueFactory<>("userId"));
-        userCol.setPrefWidth(120);
-
-        TableColumn<LogRecord, String> typeCol = new TableColumn<>("Action Type");
-        typeCol.setCellValueFactory(new PropertyValueFactory<>("actionType"));
-        typeCol.setPrefWidth(120);
-
-        TableColumn<LogRecord, String> descCol = new TableColumn<>("Description");
-        descCol.setCellValueFactory(new PropertyValueFactory<>("description"));
-        descCol.setPrefWidth(380);
-
-        logTable.getColumns().addAll(List.of(timeCol, userCol, typeCol, descCol));
-        logTable.setItems(logData);
-
-        String sql = "SELECT timestamp, user_id, action_type, description FROM AuditLogs ORDER BY log_id DESC";
-        try (Connection conn = DriverManager.getConnection(DB_URL);
-                Statement stmt = conn.createStatement();
-                ResultSet rs = stmt.executeQuery(sql)) {
-
-            while (rs.next()) {
-                logData.add(new LogRecord(
-                        rs.getString("timestamp"),
-                        rs.getString("user_id"),
-                        rs.getString("action_type"),
-                        rs.getString("description")));
-            }
-        } catch (SQLException ex) {
-            showAlert("Error Loading Logs", ex.getMessage());
+        if (emp.getId().length() >= 2) {
+            avatarText.setText(emp.getId().substring(0, 2).toUpperCase());
+        } else {
+            avatarText.setText("ID");
         }
 
-        VBox layout = new VBox(10, new Label("Recent Activity Logs:"), logTable);
-        layout.setPadding(new Insets(15));
-        layout.setStyle(getActiveThemeVars() + "-fx-background-color: -theme-panel;");
-
-        Scene scene = new Scene(layout, 800, 450);
-        dialog.setScene(scene);
-        dialog.showAndWait();
+        skillsData.clear();
+        try {
+            skillsData.addAll(dbManager.fetchEmployeeSkills(emp.getId()));
+            if (statusLabel != null)
+                statusLabel.setText("✅ Loaded profile for " + emp.getId());
+        } catch (SQLException e) {
+            System.err.println("[Skill Fetch Error] " + e.getMessage());
+            e.printStackTrace();
+            showFriendlyError("Data Fetch Error", "Could not load skills profile for the selected employee.");
+        }
     }
 
     private void handleRemoveSelectedEmployee() {
         if (!"ADMIN".equals(userRole)) {
-            showAlert("Access Denied", "Only administrators can remove employees.");
+            showFriendlyError("Access Denied", "Only administrative accounts can remove employee profiles.");
             return;
         }
 
         EmployeeRecord selected = employeeTable.getSelectionModel().getSelectedItem();
         if (selected == null) {
-            showAlert("No Employee Selected", "Please select an employee from the table first to remove.");
+            showFriendlyError("Selection Required", "Please select an employee profile to remove.");
             return;
         }
 
@@ -576,10 +491,10 @@ public class SkillMatrixApp extends Application {
         GridPane grid = new GridPane();
         grid.setHgap(10);
         grid.setVgap(10);
-        grid.setPadding(new Insets(20, 20, 10, 10));
+        grid.setPadding(new Insets(20));
 
         Label warningLabel = new Label(
-                "This action is permanent and will remove all associated qualifications.\nTo proceed, please enter the Admin Password:");
+                "This action is permanent and removes all associated qualifications.\nEnter Admin Password:");
         warningLabel.setWrapText(true);
 
         PasswordField passwordInput = new PasswordField();
@@ -590,58 +505,38 @@ public class SkillMatrixApp extends Application {
         grid.add(passwordInput, 1, 1);
 
         passwordDialog.getDialogPane().setContent(grid);
-
         passwordDialog.setResultConverter(
                 dialogButton -> dialogButton == confirmButtonType ? passwordInput.getText().trim() : null);
 
         Optional<String> result = passwordDialog.showAndWait();
         if (result.isPresent()) {
-            if ("admin123".equals(result.get())) {
-                deleteEmployeeFromDatabase(selected.getId(), selected.getName());
-            } else {
-                showAlert("Authentication Failed", "Incorrect admin password. Employee deletion cancelled.");
-            }
-        }
-    }
-
-    private void deleteEmployeeFromDatabase(String empId, String empName) {
-        String deleteQualificationsSql = "DELETE FROM Qualifications WHERE employee_id = ?";
-        String deleteEmployeeSql = "DELETE FROM Employees WHERE id = ?";
-
-        try (Connection conn = DriverManager.getConnection(DB_URL)) {
-            conn.setAutoCommit(false);
-
-            try (PreparedStatement pstmtQual = conn.prepareStatement(deleteQualificationsSql);
-                    PreparedStatement pstmtEmp = conn.prepareStatement(deleteEmployeeSql)) {
-
-                pstmtQual.setString(1, empId);
-                pstmtQual.executeUpdate();
-
-                pstmtEmp.setString(1, empId);
-                int rows = pstmtEmp.executeUpdate();
-
-                conn.commit();
-
-                if (rows > 0) {
-                    logAction("DELETE_EMPLOYEE", "Removed employee ID: " + empId + " (" + empName + ")");
-                    statusLabel.setText("✅ Successfully removed employee: " + empId);
-                    clearProfileFields();
-                    executeSearch();
+            try {
+                if (dbManager.verifyAdminPassword(result.get())) {
+                    boolean success = dbManager.deleteEmployeeTransaction(selected.getId());
+                    if (success) {
+                        dbManager.logAction(currentUser, "DELETE_EMPLOYEE",
+                                "Removed employee: " + selected.getId() + " (" + selected.getName() + ")");
+                        if (statusLabel != null)
+                            statusLabel.setText("✅ Removed employee: " + selected.getId());
+                        clearProfileFields();
+                        executeSearch();
+                    } else {
+                        showFriendlyError("Delete Failed", "The employee record could not be found in the system.");
+                    }
                 } else {
-                    showAlert("Delete Failed", "No record found for employee ID: " + empId);
+                    showFriendlyError("Security Check Failed", "Incorrect password entered. Operation cancelled.");
                 }
-            } catch (SQLException ex) {
-                conn.rollback();
-                showAlert("Database Error", "Failed to remove employee.\n\n" + ex.getMessage());
+            } catch (SQLException e) {
+                System.err.println("[Delete Error] " + e.getMessage());
+                e.printStackTrace();
+                showFriendlyError("Database Error", "An error occurred while removing the employee record.");
             }
-        } catch (SQLException ex) {
-            showAlert("Database Error", "Database connection error.\n\n" + ex.getMessage());
         }
     }
 
     private void showAddEmployeeDialog() {
         if (!"ADMIN".equals(userRole)) {
-            showAlert("Access Denied", "Only administrators can add new employees.");
+            showFriendlyError("Access Denied", "Only administrative accounts can register employees.");
             return;
         }
 
@@ -667,41 +562,35 @@ public class SkillMatrixApp extends Application {
         grid.addRow(4, createTitleLabel("Team Leader:"), leaderInput);
 
         Button saveBtn = new Button("Save Employee");
-        saveBtn.setStyle("-fx-background-color: -theme-accent; -fx-text-fill: white; -fx-font-weight: bold;");
+        saveBtn.getStyleClass().add("btn-primary");
 
         saveBtn.setOnAction(e -> {
             String empId = idInput.getText().trim().toUpperCase();
             String empName = nameInput.getText().trim().toUpperCase();
 
             if (empId.isEmpty() || empName.isEmpty()) {
-                showAlert("Validation Error", "Employee ID and Full Name are required.");
+                showFriendlyError("Validation Error", "Employee ID and Full Name are required fields.");
                 return;
             }
 
-            String sql = "INSERT INTO Employees (id, name, employment_date, area, team_leader) VALUES (?, ?, ?, ?, ?)";
-            try (Connection conn = DriverManager.getConnection(DB_URL);
-                    PreparedStatement pstmt = conn.prepareStatement(sql)) {
-                pstmt.setString(1, empId);
-                pstmt.setString(2, empName);
-                pstmt.setString(3, dateInput.getText().trim());
-                pstmt.setString(4, areaInput.getText().trim().toUpperCase());
-                pstmt.setString(5, leaderInput.getText().trim().toUpperCase());
-                pstmt.executeUpdate();
-
-                logAction("ADD_EMPLOYEE", "Added employee ID: " + empId + " (" + empName + ")");
-                statusLabel.setText("✅ Successfully added employee: " + empId);
+            try {
+                dbManager.addEmployee(empId, empName, dateInput.getText().trim(),
+                        areaInput.getText().trim().toUpperCase(), leaderInput.getText().trim().toUpperCase());
+                dbManager.logAction(currentUser, "ADD_EMPLOYEE", "Added employee ID: " + empId + " (" + empName + ")");
+                statusLabel.setText("✅ Added employee: " + empId);
                 executeSearch();
                 dialog.close();
             } catch (SQLException ex) {
-                showAlert("Database Error", "Failed to add employee.\n\n" + ex.getMessage());
+                System.err.println("[Add Employee Error] " + ex.getMessage());
+                ex.printStackTrace();
+                showFriendlyError("Registration Failed", "Could not save new employee. The ID may already exist.");
             }
         });
 
         VBox layout = new VBox(20, grid, saveBtn);
         layout.setAlignment(Pos.CENTER);
         layout.setPadding(new Insets(10));
-        layout.setStyle(getActiveThemeVars()
-                + "-fx-background-color: -theme-panel; -fx-font-family: 'Segoe UI', Arial, sans-serif;");
+        layout.getStyleClass().addAll("root-container", isDarkMode ? "theme-dark" : "theme-light");
 
         Scene scene = new Scene(layout, 400, 350);
         dialog.setScene(scene);
@@ -710,7 +599,7 @@ public class SkillMatrixApp extends Application {
 
     private void showAddSkillDialog() {
         if (!"ADMIN".equals(userRole)) {
-            showAlert("Access Denied", "Only administrators can add new qualifications.");
+            showFriendlyError("Access Denied", "Only administrative accounts can add qualifications.");
             return;
         }
 
@@ -735,22 +624,22 @@ public class SkillMatrixApp extends Application {
                 "1(Collaborateur en besoin de suivi)", "2(Collaborateur autonome)",
                 "3(Collaborateur en maitrise)", "4(Collaborateur capable de former)");
         levelCombo.setValue("1(Collaborateur en besoin de suivi)");
-        levelCombo.setStyle("-fx-background-color: -theme-bg;");
 
         TextField certPathInput = createDialogField("Certification File Path (Optional)");
         certPathInput.setEditable(false);
 
         Button browseBtn = new Button("Browse...");
-        browseBtn.setStyle("-fx-background-color: -theme-border; -fx-text-fill: -theme-text; -fx-cursor: hand;");
+        browseBtn.getStyleClass().add("btn-secondary");
         browseBtn.setOnAction(e -> {
             FileChooser fileChooser = new FileChooser();
             fileChooser.setTitle("Select Certification Document");
-            fileChooser.getExtensionFilters().addAll(
-                    new FileChooser.ExtensionFilter("Documents & Images", "*.pdf", "*.png", "*.jpg", "*.jpeg"));
+            fileChooser.getExtensionFilters()
+                    .addAll(new FileChooser.ExtensionFilter("Documents & Images", "*.pdf", "*.png", "*.jpg", "*.jpeg"));
             File selectedFile = fileChooser.showOpenDialog(dialog);
             if (selectedFile != null)
                 certPathInput.setText(selectedFile.getAbsolutePath());
         });
+
         HBox pathBox = new HBox(5, certPathInput, browseBtn);
         HBox.setHgrow(certPathInput, Priority.ALWAYS);
 
@@ -761,7 +650,7 @@ public class SkillMatrixApp extends Application {
         grid.addRow(4, createTitleLabel("Certificate:"), pathBox);
 
         Button saveBtn = new Button("Save Qualification");
-        saveBtn.setStyle("-fx-background-color: -theme-accent; -fx-text-fill: white; -fx-font-weight: bold;");
+        saveBtn.getStyleClass().add("btn-primary");
 
         saveBtn.setOnAction(e -> {
             String empId = idInput.getText().trim().toUpperCase();
@@ -769,73 +658,127 @@ public class SkillMatrixApp extends Application {
             String level = levelCombo.getValue();
 
             if (empId.isEmpty() || station.isEmpty()) {
-                showAlert("Validation Error", "Employee ID and Station are required.");
+                showFriendlyError("Validation Error", "Employee ID and Station are required.");
                 return;
             }
 
-            String sql = "INSERT INTO Qualifications (employee_id, line_number, station, qualification_level, cert_path) VALUES (?, ?, ?, ?, ?)";
-            try (Connection conn = DriverManager.getConnection(DB_URL);
-                    PreparedStatement pstmt = conn.prepareStatement(sql)) {
-                pstmt.setString(1, empId);
-                pstmt.setString(2, lineInput.getText().trim());
-                pstmt.setString(3, station);
-                pstmt.setString(4, level);
-                pstmt.setString(5, certPathInput.getText().trim());
-                pstmt.executeUpdate();
-
-                logAction("ADD_SKILL", "Added skill '" + station + "' (" + level + ") for employee: " + empId);
-                statusLabel.setText("✅ Successfully added skill for: " + empId);
+            try {
+                dbManager.addSkill(empId, lineInput.getText().trim(), station, level, certPathInput.getText().trim());
+                dbManager.logAction(currentUser, "ADD_SKILL", "Added skill '" + station + "' for: " + empId);
+                statusLabel.setText("✅ Added skill for: " + empId);
 
                 if (idValue != null && empId.equals(idValue.getText())) {
                     loadEmployeeDetails(employeeTable.getSelectionModel().getSelectedItem());
                 }
                 dialog.close();
             } catch (SQLException ex) {
-                showAlert("Database Error", "Failed to add qualification.\n\n" + ex.getMessage());
+                System.err.println("[Add Skill Error] " + ex.getMessage());
+                ex.printStackTrace();
+                showFriendlyError("Save Failed", "Could not save skill record. Please check the details entered.");
             }
         });
 
         VBox layout = new VBox(20, grid, saveBtn);
         layout.setAlignment(Pos.CENTER);
         layout.setPadding(new Insets(10));
-        layout.setStyle(getActiveThemeVars()
-                + "-fx-background-color: -theme-panel; -fx-font-family: 'Segoe UI', Arial, sans-serif;");
+        layout.getStyleClass().addAll("root-container", isDarkMode ? "theme-dark" : "theme-light");
 
         Scene scene = new Scene(layout, 500, 350);
         dialog.setScene(scene);
         dialog.showAndWait();
     }
 
+    private void openCertificationFile(String path) {
+        if (path == null || path.trim().isEmpty() || path.equalsIgnoreCase("null")) {
+            showFriendlyError("No Certificate", "There is no certification document linked to this qualification.");
+            return;
+        }
+
+        try {
+            File file = new File(path);
+            if (file.exists()) {
+                Desktop.getDesktop().open(file);
+                dbManager.logAction(currentUser, "VIEW_CERT", "Opened certificate: " + path);
+            } else {
+                showFriendlyError("File Not Found",
+                        "The requested document file could not be located at the target path.");
+            }
+        } catch (Exception ex) {
+            System.err.println("[File Open Error] " + ex.getMessage());
+            ex.printStackTrace();
+            showFriendlyError("Launch Error", "Failed to open the attachment file via the operating system.");
+        }
+    }
+
+    private void showAuditLogsDialog() {
+        Stage dialog = new Stage();
+        dialog.initModality(Modality.APPLICATION_MODAL);
+        dialog.setTitle("System Audit & Traceability Logs");
+
+        TableView<LogRecord> logTable = new TableView<>();
+        ObservableList<LogRecord> logData = FXCollections.observableArrayList();
+
+        TableColumn<LogRecord, String> timeCol = new TableColumn<>("Timestamp");
+        timeCol.setCellValueFactory(new PropertyValueFactory<>("timestamp"));
+
+        TableColumn<LogRecord, String> userCol = new TableColumn<>("User ID");
+        userCol.setCellValueFactory(new PropertyValueFactory<>("userId"));
+
+        TableColumn<LogRecord, String> typeCol = new TableColumn<>("Action Type");
+        typeCol.setCellValueFactory(new PropertyValueFactory<>("actionType"));
+
+        TableColumn<LogRecord, String> descCol = new TableColumn<>("Description");
+        descCol.setCellValueFactory(new PropertyValueFactory<>("description"));
+
+        logTable.getColumns().addAll(List.of(timeCol, userCol, typeCol, descCol));
+        logTable.setItems(logData);
+
+        try {
+            logData.addAll(dbManager.fetchAuditLogs());
+        } catch (SQLException ex) {
+            System.err.println("[Log Load Error] " + ex.getMessage());
+            ex.printStackTrace();
+            showFriendlyError("Log Fetch Failed", "Unable to load system audit history.");
+        }
+
+        VBox layout = new VBox(10, new Label("Recent Activity Logs:"), logTable);
+        layout.setPadding(new Insets(15));
+        layout.getStyleClass().addAll("root-container", isDarkMode ? "theme-dark" : "theme-light");
+
+        Scene scene = new Scene(layout, 800, 450);
+        dialog.setScene(scene);
+        dialog.showAndWait();
+    }
+
+    // ==========================================
+    // HELPERS & ALERTS
+    // ==========================================
+
+    private void showFriendlyError(String title, String userFriendlyMessage) {
+        Alert alert = new Alert(Alert.AlertType.WARNING);
+        alert.setTitle(title);
+        alert.setHeaderText(null);
+        alert.setContentText(userFriendlyMessage);
+        alert.showAndWait();
+    }
+
     private TextField createDialogField(String prompt) {
         TextField field = new TextField();
         field.setPromptText(prompt);
-        field.setStyle(
-                "-fx-control-inner-background: -theme-bg; -fx-text-fill: -theme-text; -fx-prompt-text-fill: -theme-muted;");
+        field.getStyleClass().add("input-field");
         return field;
-    }
-
-    private void showAlert(String title, String message) {
-        Alert alert = new Alert(Alert.AlertType.ERROR);
-        alert.setTitle(title);
-        alert.setHeaderText(null);
-        alert.setContentText(message);
-        alert.showAndWait();
     }
 
     private Label createTitleLabel(String text) {
         Label label = new Label(text);
-        label.setFont(Font.font("Arial", FontWeight.BOLD, 13));
-        label.setStyle(
-                "-fx-background-color: -theme-border; -fx-padding: 8; -fx-background-radius: 4; -fx-text-fill: -theme-muted;");
+        label.getStyleClass().add("title-label");
         label.setMaxWidth(Double.MAX_VALUE);
         return label;
     }
 
     private Label createDataLabel(String text) {
         Label label = new Label(text);
-        label.setFont(Font.font("Arial", 13));
-        label.setStyle(
-                "-fx-background-color: -theme-bg; -fx-padding: 8; -fx-background-radius: 4; -fx-border-color: -theme-border; -fx-border-radius: 4; -fx-text-fill: -theme-text;");
+        label.getStyleClass().add("data-label");
         label.setPrefWidth(180);
         return label;
     }
@@ -857,130 +800,13 @@ public class SkillMatrixApp extends Application {
             skillsData.clear();
     }
 
-    private void executeSearch() {
-        String keyword = searchField != null ? searchField.getText().trim() : "";
-        String searchType = searchCategoryCombo != null ? searchCategoryCombo.getValue() : "All Fields";
-
-        if (employeeData != null)
-            employeeData.clear();
-        clearProfileFields();
-
-        String sqlBase = "SELECT DISTINCT e.id, e.name, e.area, e.employment_date, e.team_leader FROM Employees e LEFT JOIN Qualifications q ON e.id = q.employee_id ";
-        String sqlWhere = "";
-
-        if (keyword.isEmpty()) {
-            sqlWhere = "WHERE 1=1";
-        } else {
-            switch (searchType) {
-                case "Employee ID":
-                    sqlWhere = "WHERE e.id LIKE ?";
-                    break;
-                case "Name":
-                    sqlWhere = "WHERE e.name LIKE ?";
-                    break;
-                case "Area":
-                    sqlWhere = "WHERE e.area LIKE ?";
-                    break;
-                case "Team Leader":
-                    sqlWhere = "WHERE e.team_leader LIKE ?";
-                    break;
-                case "Line Number":
-                    sqlWhere = "WHERE q.line_number LIKE ?";
-                    break;
-                case "Station":
-                    sqlWhere = "WHERE q.station LIKE ?";
-                    break;
-                case "Skill Level":
-                    sqlWhere = "WHERE q.qualification_level LIKE ?";
-                    break;
-                case "All Fields":
-                default:
-                    sqlWhere = "WHERE e.id LIKE ? OR e.name LIKE ? OR e.area LIKE ? OR e.team_leader LIKE ? OR q.line_number LIKE ? OR q.station LIKE ? OR q.qualification_level LIKE ?";
-                    break;
-            }
-        }
-
-        String sql = sqlBase + sqlWhere;
-
-        try (Connection conn = DriverManager.getConnection(DB_URL);
-                PreparedStatement pstmt = conn.prepareStatement(sql)) {
-
-            if (!keyword.isEmpty()) {
-                String searchPattern = "%" + keyword + "%";
-                if ("All Fields".equals(searchType)) {
-                    for (int i = 1; i <= 7; i++)
-                        pstmt.setString(i, searchPattern);
-                } else {
-                    pstmt.setString(1, searchPattern);
-                }
-            }
-
-            ResultSet rs = pstmt.executeQuery();
-            int count = 0;
-            while (rs.next()) {
-                employeeData.add(new EmployeeRecord(
-                        rs.getString("id"), rs.getString("name"),
-                        rs.getString("area"), rs.getString("employment_date"),
-                        rs.getString("team_leader")));
-                count++;
-            }
-            if (statusLabel != null)
-                statusLabel.setText("✅ Found " + count + " employees matching criteria | Logged as: " + currentUser);
-
-            if (employeeTable != null && !employeeData.isEmpty()) {
-                employeeTable.getSelectionModel().selectFirst();
-            }
-
-        } catch (SQLException ex) {
-            if (statusLabel != null)
-                statusLabel.setText("⚠️ Database Error: " + ex.getMessage());
-        }
-    }
-
-    private void loadEmployeeDetails(EmployeeRecord emp) {
-        if (emp == null)
-            return;
-
-        idValue.setText(emp.getId());
-        nameValue.setText(emp.getName() != null ? emp.getName().toUpperCase() : "N/A");
-        areaValue.setText(emp.getArea() != null ? emp.getArea().toUpperCase() : "N/A");
-        dateValue.setText(emp.getDate() != null ? emp.getDate() : "N/A");
-        leaderValue.setText(emp.getLeader() != null ? emp.getLeader().toUpperCase() : "N/A");
-
-        if (emp.getId().length() >= 2) {
-            avatarText.setText(emp.getId().substring(0, 2).toUpperCase());
-        } else {
-            avatarText.setText("ID");
-        }
-
-        skillsData.clear();
-
-        String skillsQuery = "SELECT line_number, station, qualification_level, cert_path FROM Qualifications WHERE employee_id = ?";
-
-        try (Connection conn = DriverManager.getConnection(DB_URL);
-                PreparedStatement pstmt = conn.prepareStatement(skillsQuery)) {
-
-            pstmt.setString(1, emp.getId());
-            ResultSet rs = pstmt.executeQuery();
-
-            while (rs.next()) {
-                skillsData.add(new SkillRecord(
-                        rs.getString("line_number"),
-                        rs.getString("station"),
-                        rs.getString("qualification_level"),
-                        rs.getString("cert_path")));
-            }
-            if (statusLabel != null)
-                statusLabel.setText("✅ Loaded profile for " + emp.getId());
-        } catch (SQLException ex) {
-            if (statusLabel != null)
-                statusLabel.setText("⚠️ Error loading skills: " + ex.getMessage());
-        }
-    }
-
     public static void main(String[] args) {
         launch(args);
     }
+
+    // ==========================================
+    // DATA MODEL BEANS
+    // ==========================================
 
     public static class EmployeeRecord {
         private final SimpleStringProperty id, name, area, date, leader;
@@ -1015,10 +841,7 @@ public class SkillMatrixApp extends Application {
     }
 
     public static class SkillRecord {
-        private final SimpleStringProperty lineNumber;
-        private final SimpleStringProperty station;
-        private final SimpleStringProperty level;
-        private final SimpleStringProperty certPath;
+        private final SimpleStringProperty lineNumber, station, level, certPath;
 
         public SkillRecord(String lineNumber, String station, String level, String certPath) {
             this.lineNumber = new SimpleStringProperty(lineNumber);
@@ -1045,10 +868,7 @@ public class SkillMatrixApp extends Application {
     }
 
     public static class LogRecord {
-        private final SimpleStringProperty timestamp;
-        private final SimpleStringProperty userId;
-        private final SimpleStringProperty actionType;
-        private final SimpleStringProperty description;
+        private final SimpleStringProperty timestamp, userId, actionType, description;
 
         public LogRecord(String timestamp, String userId, String actionType, String description) {
             this.timestamp = new SimpleStringProperty(timestamp);
