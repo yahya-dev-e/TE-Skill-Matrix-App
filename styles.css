@@ -130,3 +130,44 @@
     -fx-table-header-border-color: #E0E0E0;
     -fx-text-background-color: #1C1E21;
 }
+
+/* ==========================================
+   TARGETED COMBOBOX & POPUP FIXES
+   ========================================== */
+
+/* ComboBox Container */
+.combo-box {
+    -fx-background-color: -theme-bg;
+    -fx-border-color: -theme-border;
+    -fx-border-radius: 4px;
+    -fx-background-radius: 4px;
+}
+
+/* Text in closed state */
+.combo-box .cell {
+    -fx-text-fill: -theme-text !important;
+}
+
+/* Dropdown arrow icon */
+.combo-box .arrow-button .arrow {
+    -fx-background-color: -theme-text;
+}
+
+/* Expanded Dropdown Menu */
+.combo-box-popup .list-view {
+    -fx-background-color: -theme-panel;
+    -fx-border-color: -theme-border;
+    -fx-effect: dropshadow(gaussian, rgba(0, 0, 0, 0.3), 8, 0, 0, 2);
+}
+
+.combo-box-popup .list-cell {
+    -fx-background-color: -theme-panel;
+    -fx-text-fill: -theme-text;
+    -fx-padding: 6px 10px;
+}
+
+.combo-box-popup .list-cell:hover,
+.combo-box-popup .list-cell:filled:selected {
+    -fx-background-color: -theme-accent;
+    -fx-text-fill: #FFFFFF !important;
+}
