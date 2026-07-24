@@ -98,6 +98,11 @@ public class SkillMatrixApp extends Application {
         loginDialog.setTitle("TE Skill Matrix - Authentication");
         loginDialog.setHeaderText("Please sign in with your credentials");
 
+        // FIX (bug 3): Dialog exposes setOnCloseRequest directly — no need to
+        // reach into its Window/Scene. This ensures clicking the OS 'X' quits
+        // the app cleanly instead of being treated as a failed login attempt.
+        loginDialog.setOnCloseRequest(event -> System.exit(0));
+
         ButtonType loginButtonType = new ButtonType("Login", ButtonBar.ButtonData.OK_DONE);
         loginDialog.getDialogPane().getButtonTypes().addAll(loginButtonType, ButtonType.CANCEL);
 
@@ -118,6 +123,12 @@ public class SkillMatrixApp extends Application {
 
         loginDialog.getDialogPane().setContent(grid);
 
+        // FIX (bug 3): previously this converter fell through to `return false`
+        // for BOTH a wrong password AND the Cancel button, so pressing Cancel
+        // was indistinguishable from a failed login and just re-opened the
+        // dialog in an infinite retry loop — there was no way to quit.
+        // Now: true = success, false = wrong credentials (retry), null = user
+        // explicitly cancelled (quit).
         loginDialog.setResultConverter(dialogButton -> {
             if (dialogButton == loginButtonType) {
                 try {
@@ -128,23 +139,29 @@ public class SkillMatrixApp extends Application {
                         userRole = session.getRole();
                         return true;
                     }
+                    return false;
                 } catch (SQLException e) {
                     System.err.println("[Auth Error] " + e.getMessage());
                     e.printStackTrace();
                     showFriendlyError("Authentication Error",
                             "Unable to complete login due to a system service issue. Please try again later.");
+                    return false;
                 }
             }
-            return false;
+            // Cancel button (or the 'X' close, which JavaFX routes through the
+            // CANCEL button type) -> signal "quit", not "retry".
+            return null;
         });
 
         Optional<Boolean> result = loginDialog.showAndWait();
-        if (result.isPresent() && result.get()) {
+        if (result.isPresent() && Boolean.TRUE.equals(result.get())) {
             return true;
         } else if (result.isPresent()) {
+            // Only a genuine failed login attempt reaches here now.
             showFriendlyError("Access Denied", "Invalid username or password. Please verify your credentials.");
             return showLoginDialog();
         }
+        // Cancelled or closed — quit rather than retry.
         return false;
     }
 
@@ -153,6 +170,13 @@ public class SkillMatrixApp extends Application {
     // ==========================================
 
     private void applyTheme() {
+        // FIX (bugs 1 & 2): theming is driven entirely by swapping style
+        // *classes* on the root, never by calling setStyle(...) with inline
+        // "-theme-*" strings on individual nodes. Swapping a style class is
+        // what actually triggers JavaFX to invalidate and recompute CSS for
+        // the whole subtree — every panel, label, button, and table that
+        // uses these classes (in styles.css) picks up the new theme
+        // automatically, with nothing left stuck on the old theme.
         root.getStyleClass().removeAll("theme-dark", "theme-light");
         root.getStyleClass().add(isDarkMode ? "theme-dark" : "theme-light");
 
@@ -238,6 +262,26 @@ public class SkillMatrixApp extends Application {
         searchCategoryCombo.setValue("All Fields");
         searchCategoryCombo.getStyleClass().add("btn-secondary");
 
+        // Themed popup cells + button cell via style classes (see
+        // combo-box-popup rules in styles.css) so the dropdown list isn't
+        // left with default white-on-white/black-on-black rendering in dark
+        // mode — the popup is a separate Scene, so it needs its own themed
+        // classes rather than relying on inherited inline styles.
+        searchCategoryCombo.setButtonCell(new ListCell<>() {
+            @Override
+            protected void updateItem(String item, boolean empty) {
+                super.updateItem(item, empty);
+                setText(empty ? null : item);
+            }
+        });
+        searchCategoryCombo.setCellFactory(lv -> new ListCell<>() {
+            @Override
+            protected void updateItem(String item, boolean empty) {
+                super.updateItem(item, empty);
+                setText(empty ? null : item);
+            }
+        });
+
         searchField = new TextField();
         searchField.setPromptText("Search anything...");
         searchField.setPrefWidth(160);
@@ -315,6 +359,12 @@ public class SkillMatrixApp extends Application {
 
         HBox profileHeaderBox = new HBox();
         profileHeaderBox.setAlignment(Pos.CENTER_LEFT);
+        // FIX (bug 1): this was previously an isolated container whose
+        // background was set once via inline setStyle() and never included
+        // in applyTheme()'s re-style list, so it stayed on the light-mode
+        // background forever — leaving light-colored text unreadable once
+        // everything else went dark. Using the shared class keeps it in
+        // sync automatically.
         profileHeaderBox.getStyleClass().add("panel-header-label");
 
         Label profileHeader = new Label("EMPLOYEE PROFILE");
