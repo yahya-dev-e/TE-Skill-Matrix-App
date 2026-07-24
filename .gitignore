@@ -16,4 +16,4 @@ bin/
 *.exe
 *.iss
 Output/
-dist\TESkillMatrix/
+dist/
