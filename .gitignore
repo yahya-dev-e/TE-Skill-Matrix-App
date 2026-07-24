@@ -14,3 +14,4 @@ bin/
 # Build outputs
 *.jar
 *.exe
+*.iss
