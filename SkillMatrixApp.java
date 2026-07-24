@@ -93,76 +93,71 @@ public class SkillMatrixApp extends Application {
     // USER AUTHENTICATION DIALOG
     // ==========================================
 
+    // FIX (bug 3, final): Dialog<Boolean> + resultConverter was the actual
+    // source of the bug — JavaFX's handling of a converter returning null is
+    // ambiguous/inconsistent about whether that closes the dialog. Using
+    // Dialog<ButtonType> with NO resultConverter sidesteps that ambiguity
+    // entirely: with no converter, JavaFX's default behavior is to return
+    // whichever ButtonType was clicked, directly and unambiguously. Cancel,
+    // the window 'X' (Optional.empty()), and Login are then trivial to tell
+    // apart with no null/false confusion anywhere in the chain.
     private boolean showLoginDialog() {
-        Dialog<Boolean> loginDialog = new Dialog<>();
-        loginDialog.setTitle("TE Skill Matrix - Authentication");
-        loginDialog.setHeaderText("Please sign in with your credentials");
-
-        // FIX (bug 3): Dialog exposes setOnCloseRequest directly — no need to
-        // reach into its Window/Scene. This ensures clicking the OS 'X' quits
-        // the app cleanly instead of being treated as a failed login attempt.
-        loginDialog.setOnCloseRequest(event -> System.exit(0));
-
         ButtonType loginButtonType = new ButtonType("Login", ButtonBar.ButtonData.OK_DONE);
-        loginDialog.getDialogPane().getButtonTypes().addAll(loginButtonType, ButtonType.CANCEL);
 
-        GridPane grid = new GridPane();
-        grid.setHgap(10);
-        grid.setVgap(10);
-        grid.setPadding(new Insets(20, 150, 10, 10));
+        while (true) {
+            // Build a fresh dialog each attempt
+            Dialog<ButtonType> loginDialog = new Dialog<>();
+            loginDialog.setTitle("TE Skill Matrix - Authentication");
+            loginDialog.setHeaderText("Please sign in with your credentials");
+            loginDialog.getDialogPane().getButtonTypes().addAll(loginButtonType, ButtonType.CANCEL);
 
-        TextField username = new TextField();
-        username.setPromptText("Username");
-        PasswordField password = new PasswordField();
-        password.setPromptText("Password");
+            GridPane grid = new GridPane();
+            grid.setHgap(10);
+            grid.setVgap(10);
+            grid.setPadding(new Insets(20, 150, 10, 10));
 
-        grid.add(new Label("Username:"), 0, 0);
-        grid.add(username, 1, 0);
-        grid.add(new Label("Password:"), 0, 1);
-        grid.add(password, 1, 1);
+            TextField username = new TextField();
+            username.setPromptText("Username");
+            PasswordField password = new PasswordField();
+            password.setPromptText("Password");
 
-        loginDialog.getDialogPane().setContent(grid);
+            grid.add(new Label("Username:"), 0, 0);
+            grid.add(username, 1, 0);
+            grid.add(new Label("Password:"), 0, 1);
+            grid.add(password, 1, 1);
 
-        // FIX (bug 3): previously this converter fell through to `return false`
-        // for BOTH a wrong password AND the Cancel button, so pressing Cancel
-        // was indistinguishable from a failed login and just re-opened the
-        // dialog in an infinite retry loop — there was no way to quit.
-        // Now: true = success, false = wrong credentials (retry), null = user
-        // explicitly cancelled (quit).
-        loginDialog.setResultConverter(dialogButton -> {
-            if (dialogButton == loginButtonType) {
-                try {
-                    DatabaseManager.UserSession session = dbManager.authenticate(username.getText(),
-                            password.getText());
-                    if (session != null) {
-                        currentUser = session.getUsername();
-                        userRole = session.getRole();
-                        return true;
-                    }
-                    return false;
-                } catch (SQLException e) {
-                    System.err.println("[Auth Error] " + e.getMessage());
-                    e.printStackTrace();
-                    showFriendlyError("Authentication Error",
-                            "Unable to complete login due to a system service issue. Please try again later.");
-                    return false;
-                }
+            loginDialog.getDialogPane().setContent(grid);
+
+            // Dialog<ButtonType> returns the button that was clicked directly.
+            // No resultConverter needed — this avoids all null/false confusion.
+            Optional<ButtonType> result = loginDialog.showAndWait();
+
+            // Cancel clicked, X button closed, or dialog dismissed -> exit
+            if (result.isEmpty() || result.get() == ButtonType.CANCEL) {
+                return false;
             }
-            // Cancel button (or the 'X' close, which JavaFX routes through the
-            // CANCEL button type) -> signal "quit", not "retry".
-            return null;
-        });
 
-        Optional<Boolean> result = loginDialog.showAndWait();
-        if (result.isPresent() && Boolean.TRUE.equals(result.get())) {
-            return true;
-        } else if (result.isPresent()) {
-            // Only a genuine failed login attempt reaches here now.
-            showFriendlyError("Access Denied", "Invalid username or password. Please verify your credentials.");
-            return showLoginDialog();
+            // Login button was clicked — attempt authentication
+            try {
+                DatabaseManager.UserSession session = dbManager.authenticate(
+                        username.getText(), password.getText());
+                if (session != null) {
+                    currentUser = session.getUsername();
+                    userRole = session.getRole();
+                    return true;
+                }
+            } catch (SQLException e) {
+                System.err.println("[Auth Error] " + e.getMessage());
+                e.printStackTrace();
+                showFriendlyError("Authentication Error",
+                        "Unable to complete login due to a system service issue. Please try again later.");
+                continue; // Let the user try again
+            }
+
+            // Wrong credentials — show error, then loop shows dialog again
+            showFriendlyError("Access Denied",
+                    "Invalid username or password. Please verify your credentials.");
         }
-        // Cancelled or closed — quit rather than retry.
-        return false;
     }
 
     // ==========================================
