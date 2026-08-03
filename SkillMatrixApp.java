@@ -29,10 +29,11 @@ public class SkillMatrixApp extends Application {
 
     private final DatabaseManager dbManager = new DatabaseManager();
 
-    // Session State
+    // Session & Exit Counter State
     private String currentUser = null;
     private String userRole = null;
     private boolean isDarkMode = false;
+    private int exitCounter = 0;
 
     // UI Structure
     private BorderPane root;
@@ -73,9 +74,17 @@ public class SkillMatrixApp extends Application {
 
         Scene scene = new Scene(root, 1200, 800);
         try {
-            scene.getStylesheets().add(getClass().getResource("styles.css").toExternalForm());
+            var cssUrl = getClass().getResource("styles.css");
+            if (cssUrl != null) {
+                scene.getStylesheets().add(cssUrl.toExternalForm());
+            } else {
+                File fallbackCss = new File("styles.css");
+                if (fallbackCss.exists()) {
+                    scene.getStylesheets().add(fallbackCss.toURI().toURL().toExternalForm());
+                }
+            }
         } catch (Exception e) {
-            System.err.println("[CSS] Failed to load external stylesheet: " + e.getMessage());
+            System.err.println("[CSS Warning] Stylesheet could not be loaded: " + e.getMessage());
         }
 
         applyTheme();
@@ -90,62 +99,101 @@ public class SkillMatrixApp extends Application {
     }
 
     // ==========================================
-    // USER AUTHENTICATION DIALOG
+    // USER AUTHENTICATION MODAL & EXIT COUNTER
     // ==========================================
 
     private boolean showLoginDialog() {
-        Dialog<Boolean> loginDialog = new Dialog<>();
-        loginDialog.setTitle("TE Skill Matrix - Authentication");
-        loginDialog.setHeaderText("Please sign in with your credentials");
+        while (true) {
+            Stage loginStage = new Stage();
+            loginStage.initModality(Modality.APPLICATION_MODAL);
+            loginStage.setTitle("TE Skill Matrix - Authentication");
+            loginStage.setResizable(false);
 
-        ButtonType loginButtonType = new ButtonType("Login", ButtonBar.ButtonData.OK_DONE);
-        loginDialog.getDialogPane().getButtonTypes().addAll(loginButtonType, ButtonType.CANCEL);
+            final boolean[] success = { false };
+            final boolean[] failedAttempt = { false };
 
-        GridPane grid = new GridPane();
-        grid.setHgap(10);
-        grid.setVgap(10);
-        grid.setPadding(new Insets(20, 150, 10, 10));
+            GridPane grid = new GridPane();
+            grid.setHgap(10);
+            grid.setVgap(12);
+            grid.setPadding(new Insets(20));
 
-        TextField username = new TextField();
-        username.setPromptText("Username");
-        PasswordField password = new PasswordField();
-        password.setPromptText("Password");
+            Label headerLabel = new Label("Please sign in with your credentials");
+            headerLabel.setStyle("-fx-font-weight: bold; -fx-font-size: 14px;");
 
-        grid.add(new Label("Username:"), 0, 0);
-        grid.add(username, 1, 0);
-        grid.add(new Label("Password:"), 0, 1);
-        grid.add(password, 1, 1);
+            TextField username = new TextField();
+            username.setPromptText("Username");
 
-        loginDialog.getDialogPane().setContent(grid);
+            PasswordField password = new PasswordField();
+            password.setPromptText("Password");
 
-        loginDialog.setResultConverter(dialogButton -> {
-            if (dialogButton == loginButtonType) {
+            grid.add(headerLabel, 0, 0, 2, 1);
+            grid.add(new Label("Username:"), 0, 1);
+            grid.add(username, 1, 1);
+            grid.add(new Label("Password:"), 0, 2);
+            grid.add(password, 1, 2);
+
+            Button loginBtn = new Button("Login");
+            loginBtn.setDefaultButton(true);
+
+            Button cancelBtn = new Button("Cancel");
+            cancelBtn.setCancelButton(true);
+
+            HBox buttonBox = new HBox(10, loginBtn, cancelBtn);
+            buttonBox.setAlignment(Pos.CENTER_RIGHT);
+
+            loginBtn.setOnAction(e -> {
                 try {
-                    DatabaseManager.UserSession session = dbManager.authenticate(username.getText(),
-                            password.getText());
+                    DatabaseManager.UserSession session = dbManager.authenticate(username.getText().trim(),
+                            password.getText().trim());
                     if (session != null) {
                         currentUser = session.getUsername();
                         userRole = session.getRole();
-                        return true;
+                        success[0] = true;
+                    } else {
+                        failedAttempt[0] = true;
                     }
-                } catch (SQLException e) {
-                    System.err.println("[Auth Error] " + e.getMessage());
-                    e.printStackTrace();
-                    showFriendlyError("Authentication Error",
-                            "Unable to complete login due to a system service issue. Please try again later.");
+                } catch (SQLException ex) {
+                    System.err.println("[Auth Error] " + ex.getMessage());
+                    failedAttempt[0] = true;
                 }
-            }
-            return false;
-        });
+                loginStage.close();
+            });
 
-        Optional<Boolean> result = loginDialog.showAndWait();
-        if (result.isPresent() && result.get()) {
-            return true;
-        } else if (result.isPresent()) {
+            cancelBtn.setOnAction(e -> loginStage.close());
+
+            VBox layout = new VBox(15, grid, buttonBox);
+            layout.setPadding(new Insets(15));
+            layout.setStyle("-fx-background-color: -fx-control-inner-background;");
+
+            Scene scene = new Scene(layout, 360, 200);
+            loginStage.setScene(scene);
+
+            loginStage.showAndWait();
+
+            // 1. Granted access
+            if (success[0]) {
+                return true;
+            }
+
+            // 2. Parity increments
+            if (failedAttempt[0]) {
+                exitCounter += 2; // Failed credential attempt
+            } else {
+                exitCounter += 1; // User clicked Cancel or closed window ('X')
+            }
+
+            // 3. Parity Check: If ODD -> Terminate program instantly
+            evaluateExitCounter();
+
+            // 4. Parity Check: If EVEN -> Prompt error and display login again
             showFriendlyError("Access Denied", "Invalid username or password. Please verify your credentials.");
-            return showLoginDialog();
         }
-        return false;
+    }
+
+    private void evaluateExitCounter() {
+        if (exitCounter % 2 != 0) {
+            System.exit(0);
+        }
     }
 
     // ==========================================
