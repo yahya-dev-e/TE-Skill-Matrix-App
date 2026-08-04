@@ -1,173 +1,295 @@
-/* ROOT CONTAINERS & THEMES */
+/* ==========================================
+   1. GLOBAL ROOT & THEME VARIABLES
+   ========================================== */
 .root-container {
-    -fx-font-family: 'Segoe UI', Arial, sans-serif;
+    -fx-font-family: "Segoe UI", Arial, sans-serif;
     -fx-background-size: cover;
-    -fx-background-position: center center;
+    -fx-background-position: center;
+    -fx-background-repeat: no-repeat;
 }
 
+/* Dark Theme Variables */
 .theme-dark {
-    -theme-bg: rgba(18, 18, 18, 0.85);
-    -theme-panel: rgba(30, 30, 30, 0.95);
+    -theme-bg: rgba(18, 18, 18, 0.88);
+    -theme-panel: rgba(28, 28, 28, 0.95);
     -theme-text: #FFFFFF;
-    -theme-muted: #B0B0B0;
-    -theme-border: #333333;
+    -theme-text-muted: #B0B0B0;
+    -theme-border: #383838;
     -theme-accent: #E4770B;
-    -theme-shadow: rgba(0, 0, 0, 0.6);
+    -theme-accent-hover: #F2861D;
+    -theme-input-bg: #262626;
+    -theme-table-header: #303030;
+    -theme-table-row-alt: #222222;
 }
 
+/* Light Theme Variables */
 .theme-light {
-    -theme-bg: rgba(240, 242, 245, 0.85);
+    -theme-bg: rgba(240, 242, 245, 0.88);
     -theme-panel: rgba(255, 255, 255, 0.95);
     -theme-text: #1C1E21;
-    -theme-muted: #606770;
+    -theme-text-muted: #606770;
     -theme-border: #DDDFE2;
     -theme-accent: #E4770B;
-    -theme-shadow: rgba(0, 0, 0, 0.15);
-}
-
-/* PANELS & CARDS */
-.header-bar {
-    -fx-background-color: -theme-panel;
-    -fx-effect: dropshadow(gaussian, -theme-shadow, 10, 0, 0, 2);
-}
-
-.card-panel {
-    -fx-background-color: -theme-panel;
-    -fx-background-radius: 8;
-    -fx-effect: dropshadow(gaussian, -theme-shadow, 10, 0, 0, 3);
-}
-
-.panel-header-label {
-    -fx-background-color: -theme-border;
-    -fx-padding: 10 15;
-    -fx-background-radius: 8 8 0 0;
-    -fx-border-color: -theme-accent;
-    -fx-border-width: 0 0 2 0;
-    -fx-text-fill: -theme-text;
-    -fx-font-weight: bold;
-}
-
-.user-badge {
-    -fx-text-fill: -theme-text;
-    -fx-font-weight: bold;
-    -fx-background-color: -theme-border;
-    -fx-padding: 6 12;
-    -fx-background-radius: 15;
-}
-
-.search-box-container {
-    -fx-background-color: -theme-border;
-    -fx-padding: 8;
-    -fx-background-radius: 8;
-}
-
-/* LABELS & FIELDS */
-.title-label {
-    -fx-background-color: -theme-border;
-    -fx-padding: 8;
-    -fx-background-radius: 4;
-    -fx-text-fill: -theme-muted;
-    -fx-font-weight: bold;
-}
-
-.data-label {
-    -fx-background-color: -theme-bg;
-    -fx-padding: 8;
-    -fx-background-radius: 4;
-    -fx-border-color: -theme-border;
-    -fx-border-radius: 4;
-    -fx-text-fill: -theme-text;
-}
-
-.input-field {
-    -fx-control-inner-background: -theme-bg;
-    -fx-text-fill: -theme-text;
-    -fx-prompt-text-fill: -theme-muted;
-    -fx-background-radius: 4;
-}
-
-/* BUTTONS */
-.btn-primary {
-    -fx-background-color: -theme-accent;
-    -fx-text-fill: white;
-    -fx-font-weight: bold;
-    -fx-background-radius: 4;
-    -fx-cursor: hand;
-}
-
-.btn-secondary {
-    -fx-background-color: -theme-bg;
-    -fx-text-fill: -theme-text;
-    -fx-border-color: -theme-border;
-    -fx-border-radius: 4;
-    -fx-background-radius: 4;
-    -fx-cursor: hand;
-}
-
-.btn-danger {
-    -fx-background-color: #e53935;
-    -fx-text-fill: white;
-    -fx-font-weight: bold;
-    -fx-background-radius: 4;
-    -fx-cursor: hand;
-}
-
-/* TABLE STYLING */
-.table-dark {
-    -fx-base: #1E1E1E;
-    -fx-control-inner-background: #252525;
-    -fx-background-color: #1E1E1E;
-    -fx-table-cell-border-color: #333333;
-    -fx-table-header-border-color: #333333;
-    -fx-text-background-color: #FFFFFF;
-}
-
-.table-light {
-    -fx-base: #FFFFFF;
-    -fx-control-inner-background: #FFFFFF;
-    -fx-background-color: #FFFFFF;
-    -fx-table-cell-border-color: #E0E0E0;
-    -fx-table-header-border-color: #E0E0E0;
-    -fx-text-background-color: #1C1E21;
+    -theme-accent-hover: #F2861D;
+    -theme-input-bg: #FFFFFF;
+    -theme-table-header: #EAEAEA;
+    -theme-table-row-alt: #F8F9FA;
 }
 
 /* ==========================================
-   TARGETED COMBOBOX & POPUP FIXES
+   2. HEADER & FOOTER (TOP AND BOTTOM BARS)
    ========================================== */
 
-/* ComboBox Container */
-.combo-box {
-    -fx-background-color: -theme-bg;
-    -fx-border-color: -theme-border;
-    -fx-border-radius: 4px;
-    -fx-background-radius: 4px;
+/* Dark Mode Header & Footer */
+.theme-dark .header-bar {
+    -fx-background-color: rgba(20, 20, 20, 0.90);
+    -fx-border-color: transparent transparent -theme-accent transparent;
+    -fx-border-width: 0 0 2 0;
 }
 
-/* Text in closed state */
-.combo-box .cell {
+.theme-dark .header-bar .label,
+.theme-dark .status-label {
+    -fx-text-fill: #FFFFFF !important;
+}
+
+/* Light Mode Header & Footer (White Background) */
+.theme-light .header-bar {
+    -fx-background-color: rgba(255, 255, 255, 0.95);
+    -fx-border-color: transparent transparent #DDDFE2 transparent;
+    -fx-border-width: 0 0 1 0;
+    -fx-effect: dropshadow(three-pass-box, rgba(0, 0, 0, 0.08), 5, 0, 0, 2);
+}
+
+.theme-light .header-bar .label,
+.theme-light .status-label {
+    -fx-text-fill: #1C1E21 !important;
+}
+
+/* ==========================================
+   3. DYNAMIC TEXT & LABEL STYLING
+   ========================================== */
+.theme-dark .label,
+.theme-dark .text,
+.theme-dark .panel-header-text,
+.theme-dark .data-label,
+.theme-dark .title-label {
+    -fx-text-fill: -theme-text !important;
+    -fx-fill: -theme-text !important;
+}
+
+.theme-light .label,
+.theme-light .text,
+.theme-light .panel-header-text,
+.theme-light .data-label,
+.theme-light .title-label {
+    -fx-text-fill: -theme-text !important;
+    -fx-fill: -theme-text !important;
+}
+
+.panel-header-label {
+    -fx-padding: 8 12;
+    -fx-background-color: -theme-accent;
+    -fx-background-radius: 4 4 0 0;
+}
+
+.panel-header-text {
+    -fx-font-weight: bold;
+    -fx-text-fill: #FFFFFF !important;
+}
+
+/* ==========================================
+   4. CONTAINER & PANEL CARDS
+   ========================================== */
+.card-panel {
+    -fx-background-radius: 8;
+    -fx-border-radius: 8;
+    -fx-padding: 0;
+    -fx-effect: dropshadow(three-pass-box, rgba(0, 0, 0, 0.25), 8, 0, 0, 2);
+}
+
+.theme-dark .card-panel {
+    -fx-background-color: -theme-panel;
+    -fx-border-color: -theme-border;
+}
+
+.theme-light .card-panel {
+    -fx-background-color: -theme-panel;
+    -fx-border-color: -theme-border;
+}
+
+/* ==========================================
+   5. TABLEVIEWS & CELLS
+   ========================================== */
+.table-view {
+    -fx-background-color: transparent;
+    -fx-border-color: transparent;
+}
+
+.table-view .column-header-background {
+    -fx-background-color: transparent;
+}
+
+.theme-dark .table-view .column-header,
+.theme-dark .table-view .filler {
+    -fx-background-color: -theme-table-header;
+    -fx-border-color: -theme-border;
+}
+
+.theme-light .table-view .column-header,
+.theme-light .table-view .filler {
+    -fx-background-color: -theme-table-header;
+    -fx-border-color: -theme-border;
+}
+
+.table-view .column-header .label {
+    -fx-font-weight: bold;
+    -fx-alignment: CENTER-LEFT;
+}
+
+.theme-dark .table-row-cell {
+    -fx-background-color: -theme-panel;
+    -fx-text-fill: -theme-text !important;
+    -fx-border-color: transparent transparent -theme-border transparent;
+}
+
+.theme-dark .table-row-cell:odd {
+    -fx-background-color: -theme-table-row-alt;
+}
+
+.theme-light .table-row-cell {
+    -fx-background-color: #FFFFFF;
+    -fx-text-fill: -theme-text !important;
+    -fx-border-color: transparent transparent -theme-border transparent;
+}
+
+.theme-light .table-row-cell:odd {
+    -fx-background-color: -theme-table-row-alt;
+}
+
+.table-row-cell:selected {
+    -fx-background-color: -theme-accent !important;
+}
+
+.table-row-cell:selected .text,
+.table-row-cell:selected .table-cell {
+    -fx-text-fill: #FFFFFF !important;
+    -fx-fill: #FFFFFF !important;
+}
+
+.table-cell {
+    -fx-padding: 8 10;
+    -fx-alignment: CENTER-LEFT;
+}
+
+.theme-dark .table-cell {
     -fx-text-fill: -theme-text !important;
 }
 
-/* Dropdown arrow icon */
-.combo-box .arrow-button .arrow {
-    -fx-background-color: -theme-text;
+.theme-light .table-cell {
+    -fx-text-fill: -theme-text !important;
 }
 
-/* Expanded Dropdown Menu */
-.combo-box-popup .list-view {
-    -fx-background-color: -theme-panel;
-    -fx-border-color: -theme-border;
-    -fx-effect: dropshadow(gaussian, rgba(0, 0, 0, 0.3), 8, 0, 0, 2);
-}
-
-.combo-box-popup .list-cell {
-    -fx-background-color: -theme-panel;
-    -fx-text-fill: -theme-text;
-    -fx-padding: 6px 10px;
-}
-
-.combo-box-popup .list-cell:hover,
-.combo-box-popup .list-cell:filled:selected {
+/* ==========================================
+   6. BUTTONS & INPUT FIELDS IN LIGHT/DARK
+   ========================================== */
+.btn-primary {
     -fx-background-color: -theme-accent;
     -fx-text-fill: #FFFFFF !important;
+    -fx-font-weight: bold;
+    -fx-background-radius: 4;
+    -fx-cursor: hand;
+}
+
+.btn-primary:hover {
+    -fx-background-color: -theme-accent-hover;
+}
+
+/* Secondary Buttons in Light Mode (Clean Light Grey with Dark Text) */
+.theme-light .btn-secondary {
+    -fx-background-color: #E4E6EB;
+    -fx-text-fill: #050505 !important;
+    -fx-background-radius: 4;
+    -fx-cursor: hand;
+}
+
+.theme-light .btn-secondary:hover {
+    -fx-background-color: #D8DADF;
+}
+
+/* Secondary Buttons in Dark Mode */
+.theme-dark .btn-secondary {
+    -fx-background-color: #3A3B3C;
+    -fx-text-fill: #FFFFFF !important;
+    -fx-background-radius: 4;
+    -fx-cursor: hand;
+}
+
+.theme-dark .btn-secondary:hover {
+    -fx-background-color: #4E4F50;
+}
+
+.btn-danger {
+    -fx-background-color: #D9381E;
+    -fx-text-fill: #FFFFFF !important;
+    -fx-font-weight: bold;
+    -fx-background-radius: 4;
+    -fx-cursor: hand;
+}
+
+.btn-danger:hover {
+    -fx-background-color: #E64A19;
+}
+
+/* Input Fields */
+.input-field {
+    -fx-background-radius: 4;
+    -fx-padding: 6 10;
+}
+
+.theme-dark .input-field {
+    -fx-background-color: -theme-input-bg;
+    -fx-text-fill: -theme-text;
+    -fx-prompt-text-fill: -theme-text-muted;
+    -fx-border-color: -theme-border;
+}
+
+.theme-light .input-field {
+    -fx-background-color: #FFFFFF;
+    -fx-text-fill: #1C1E21;
+    -fx-prompt-text-fill: #8A8D91;
+    -fx-border-color: #CCD0D5;
+}
+
+/* ==========================================
+   7. PROFILE DISPLAY CARDS
+   ========================================== */
+.title-label {
+    -fx-padding: 6 10;
+    -fx-font-weight: bold;
+    -fx-background-radius: 4 0 0 4;
+}
+
+.theme-dark .title-label {
+    -fx-background-color: #333333;
+    -fx-border-color: -theme-border;
+}
+
+.theme-light .title-label {
+    -fx-background-color: #E8EBEF;
+    -fx-border-color: -theme-border;
+}
+
+.data-label {
+    -fx-padding: 6 10;
+    -fx-background-radius: 0 4 4 0;
+}
+
+.theme-dark .data-label {
+    -fx-background-color: #222222;
+    -fx-border-color: -theme-border;
+}
+
+.theme-light .data-label {
+    -fx-background-color: #FFFFFF;
+    -fx-border-color: -theme-border;
 }

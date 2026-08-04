@@ -68,7 +68,7 @@ public class DatabaseManager {
     }
 
     // ==========================================
-    // AUTHENTICATION & SECURITY
+    // SECURITY
     // ==========================================
 
     public boolean verifyAdminPassword(String password) {

@@ -12,7 +12,6 @@ import javafx.scene.image.ImageView;
 import javafx.scene.layout.*;
 import javafx.scene.paint.Color;
 import javafx.scene.shape.Circle;
-import javafx.scene.text.Font;
 import javafx.scene.text.FontWeight;
 import javafx.scene.text.Text;
 import javafx.stage.Modality;
@@ -21,9 +20,19 @@ import javafx.stage.FileChooser;
 
 import java.awt.Desktop;
 import java.io.File;
+import java.io.FileOutputStream;
 import java.sql.SQLException;
 import java.util.List;
 import java.util.Optional;
+
+// Apache POI Imports
+import org.apache.poi.ss.usermodel.Workbook;
+import org.apache.poi.ss.usermodel.Sheet;
+import org.apache.poi.ss.usermodel.Row;
+import org.apache.poi.ss.usermodel.CellStyle;
+import org.apache.poi.ss.usermodel.IndexedColors;
+import org.apache.poi.ss.usermodel.FillPatternType;
+import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 
 public class SkillMatrixApp extends Application {
 
@@ -99,7 +108,7 @@ public class SkillMatrixApp extends Application {
     }
 
     // ==========================================
-    // SECURITY PASSWORD PROMPT
+    // SECURITY PASSWORD PROMPT (FOR ADMIN ACTIONS)
     // ==========================================
 
     private boolean promptAdminPassword(String actionDescription) {
@@ -233,10 +242,15 @@ public class SkillMatrixApp extends Application {
         multiFilterBtn.getStyleClass().add("btn-secondary");
         multiFilterBtn.setOnAction(e -> showAdvancedFilterDialog());
 
+        Button exportBtn = new Button("📊 Export Excel");
+        exportBtn.getStyleClass().add("btn-secondary");
+        exportBtn.setOnAction(e -> exportFilteredResultsToExcel());
+
         Button clearBtn = new Button("Clear");
         clearBtn.getStyleClass().add("btn-secondary");
 
-        searchBox.getChildren().addAll(searchCategoryCombo, searchField, searchBtn, multiFilterBtn, clearBtn);
+        searchBox.getChildren().addAll(searchCategoryCombo, searchField, searchBtn, multiFilterBtn, exportBtn,
+                clearBtn);
         header.getChildren().addAll(logsBtn, themeBtn, spacer, searchBox);
 
         searchBtn.setOnAction(e -> executeSearch());
@@ -259,13 +273,15 @@ public class SkillMatrixApp extends Application {
         headerContainer.getStyleClass().add("panel-header-label");
 
         Label titleLabel = new Label("SEARCH RESULTS");
-        titleLabel.setFont(Font.font("Arial", FontWeight.BOLD, 14));
+        titleLabel.setFont(javafx.scene.text.Font.font("Arial", FontWeight.BOLD, 14));
+        titleLabel.getStyleClass().add("panel-header-text");
 
         Region spacer = new Region();
         HBox.setHgrow(spacer, Priority.ALWAYS);
 
         resultsHeaderLabel = new Label("Total Employees: 0");
-        resultsHeaderLabel.setFont(Font.font("Arial", FontWeight.BOLD, 12));
+        resultsHeaderLabel.setFont(javafx.scene.text.Font.font("Arial", FontWeight.BOLD, 12));
+        resultsHeaderLabel.getStyleClass().add("panel-header-text");
         resultsHeaderLabel.setStyle("-fx-padding: 0 10 0 0;");
 
         headerContainer.getChildren().addAll(titleLabel, spacer, resultsHeaderLabel);
@@ -315,7 +331,8 @@ public class SkillMatrixApp extends Application {
         profileHeaderBox.getStyleClass().add("panel-header-label");
 
         Label profileHeader = new Label("EMPLOYEE PROFILE");
-        profileHeader.setFont(Font.font("Arial", FontWeight.BOLD, 14));
+        profileHeader.setFont(javafx.scene.text.Font.font("Arial", FontWeight.BOLD, 14));
+        profileHeader.getStyleClass().add("panel-header-text");
 
         Region profileSpacer = new Region();
         HBox.setHgrow(profileSpacer, Priority.ALWAYS);
@@ -333,7 +350,7 @@ public class SkillMatrixApp extends Application {
         StackPane avatarPane = new StackPane();
         Circle avatar = new Circle(32, Color.web("#E4770B"));
         avatarText = new Text("ID");
-        avatarText.setFont(Font.font("Arial", FontWeight.BOLD, 16));
+        avatarText.setFont(javafx.scene.text.Font.font("Arial", FontWeight.BOLD, 16));
         avatarText.setFill(Color.WHITE);
         avatarPane.getChildren().addAll(avatar, avatarText);
 
@@ -360,6 +377,7 @@ public class SkillMatrixApp extends Application {
 
         Label skillsHeader = new Label("QUALIFICATIONS & SKILLS (Double-click to open certificate)");
         skillsHeader.getStyleClass().add("panel-header-label");
+        skillsHeader.getStyleClass().add("panel-header-text");
         skillsHeader.setMaxWidth(Double.MAX_VALUE);
 
         skillsTable = new TableView<>();
@@ -404,9 +422,116 @@ public class SkillMatrixApp extends Application {
         footer.setPadding(new Insets(5, 15, 5, 15));
 
         statusLabel = new Label("Database Connected");
-        statusLabel.setFont(Font.font("Arial", 12));
+        statusLabel.setFont(javafx.scene.text.Font.font("Arial", 12));
+        statusLabel.getStyleClass().add("status-label");
+
         footer.getChildren().add(statusLabel);
         return footer;
+    }
+
+    // ==========================================
+    // EXPORT TO EXCEL FEATURE
+    // ==========================================
+
+    private void exportFilteredResultsToExcel() {
+        if (employeeData == null || employeeData.isEmpty()) {
+            showFriendlyError("Export Unavailable",
+                    "No employee records found to export. Please execute a search first.");
+            return;
+        }
+
+        FileChooser fileChooser = new FileChooser();
+        fileChooser.setTitle("Save Skill Matrix Export");
+        fileChooser.setInitialFileName("Skill_Matrix_Filtered_Export.xlsx");
+        fileChooser.getExtensionFilters().add(new FileChooser.ExtensionFilter("Excel Workbook (*.xlsx)", "*.xlsx"));
+
+        File file = fileChooser.showSaveDialog(root.getScene().getWindow());
+        if (file == null) {
+            return;
+        }
+
+        try (Workbook workbook = new XSSFWorkbook()) {
+            CellStyle headerStyle = workbook.createCellStyle();
+            org.apache.poi.ss.usermodel.Font poiHeaderFont = workbook.createFont();
+            poiHeaderFont.setBold(true);
+            headerStyle.setFont(poiHeaderFont);
+            headerStyle.setFillForegroundColor(IndexedColors.GREY_25_PERCENT.getIndex());
+            headerStyle.setFillPattern(FillPatternType.SOLID_FOREGROUND);
+
+            Sheet sheetEmp = workbook.createSheet("Filtered Employees");
+
+            Row headerRow = sheetEmp.createRow(0);
+            String[] empHeaders = { "Employee ID", "Full Name", "Start Date", "Area", "Team Leader" };
+            for (int i = 0; i < empHeaders.length; i++) {
+                org.apache.poi.ss.usermodel.Cell cell = headerRow.createCell(i);
+                cell.setCellValue(empHeaders[i]);
+                cell.setCellStyle(headerStyle);
+            }
+
+            int rowNum = 1;
+            for (EmployeeRecord emp : employeeData) {
+                Row row = sheetEmp.createRow(rowNum++);
+                row.createCell(0).setCellValue(emp.getId());
+                row.createCell(1).setCellValue(emp.getName());
+                row.createCell(2).setCellValue(emp.getDate() != null ? emp.getDate() : "");
+                row.createCell(3).setCellValue(emp.getArea() != null ? emp.getArea() : "");
+                row.createCell(4).setCellValue(emp.getLeader() != null ? emp.getLeader() : "");
+            }
+
+            for (int i = 0; i < empHeaders.length; i++) {
+                sheetEmp.autoSizeColumn(i);
+            }
+
+            Sheet sheetSkills = workbook.createSheet("Detailed Qualifications");
+            Row skillHeaderRow = sheetSkills.createRow(0);
+            String[] skillHeaders = { "Employee ID", "Full Name", "Area", "Line Number", "Station", "Skill Level" };
+            for (int i = 0; i < skillHeaders.length; i++) {
+                org.apache.poi.ss.usermodel.Cell cell = skillHeaderRow.createCell(i);
+                cell.setCellValue(skillHeaders[i]);
+                cell.setCellStyle(headerStyle);
+            }
+
+            int skillRowNum = 1;
+            for (EmployeeRecord emp : employeeData) {
+                List<SkillRecord> skills = dbManager.fetchEmployeeSkills(
+                        emp.getId(), activeLineFilter, activeStationFilter, activeLevelFilter);
+
+                for (SkillRecord skill : skills) {
+                    Row row = sheetSkills.createRow(skillRowNum++);
+                    row.createCell(0).setCellValue(emp.getId());
+                    row.createCell(1).setCellValue(emp.getName());
+                    row.createCell(2).setCellValue(skill.getArea());
+                    row.createCell(3).setCellValue(skill.getLineNumber());
+                    row.createCell(4).setCellValue(skill.getStation());
+                    row.createCell(5).setCellValue(skill.getLevel());
+                }
+            }
+
+            for (int i = 0; i < skillHeaders.length; i++) {
+                sheetSkills.autoSizeColumn(i);
+            }
+
+            try (FileOutputStream fileOut = new FileOutputStream(file)) {
+                workbook.write(fileOut);
+            }
+
+            dbManager.logAction("GUEST", "EXPORT_EXCEL",
+                    "Exported " + employeeData.size() + " records to Excel: " + file.getName());
+            if (statusLabel != null) {
+                statusLabel.setText("✅ Export successful: " + file.getName());
+            }
+
+            Alert alert = new Alert(Alert.AlertType.INFORMATION);
+            alert.setTitle("Export Complete");
+            alert.setHeaderText(null);
+            alert.setContentText("Excel file generated successfully!\nPath: " + file.getAbsolutePath());
+            alert.showAndWait();
+
+        } catch (Exception ex) {
+            System.err.println("[Export Error] " + ex.getMessage());
+            ex.printStackTrace();
+            showFriendlyError("Export Failed", "Could not create Excel file: " + ex.getMessage());
+        }
     }
 
     // ==========================================
