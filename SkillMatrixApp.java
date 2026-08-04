@@ -29,19 +29,24 @@ public class SkillMatrixApp extends Application {
 
     private final DatabaseManager dbManager = new DatabaseManager();
 
-    // Session & Exit Counter State
-    private String currentUser = null;
-    private String userRole = null;
+    // Session State
     private boolean isDarkMode = false;
-    private int exitCounter = 0;
+
+    // Active qualification filter context
+    private String activeLineFilter = null;
+    private String activeStationFilter = null;
+    private String activeLevelFilter = null;
 
     // UI Structure
     private BorderPane root;
     private Button themeBtn;
     private TextField searchField;
     private ComboBox<String> searchCategoryCombo;
-    private Label idValue, nameValue, dateValue, areaValue, leaderValue, statusLabel, userSessionLabel;
+    private Label idValue, nameValue, dateValue, areaValue, leaderValue, statusLabel;
     private Text avatarText;
+
+    // Search Result Count Label
+    private Label resultsHeaderLabel;
 
     // Tables
     private TableView<EmployeeRecord> employeeTable;
@@ -51,11 +56,6 @@ public class SkillMatrixApp extends Application {
 
     @Override
     public void start(Stage primaryStage) {
-        if (!showLoginDialog()) {
-            System.exit(0);
-            return;
-        }
-
         root = new BorderPane();
         root.getStyleClass().add("root-container");
 
@@ -94,106 +94,46 @@ public class SkillMatrixApp extends Application {
         primaryStage.setMaximized(true);
         primaryStage.show();
 
-        dbManager.logAction(currentUser, "SYSTEM", "User logged into session");
+        dbManager.logAction("GUEST", "SYSTEM", "Application started");
         executeSearch();
     }
 
     // ==========================================
-    // USER AUTHENTICATION MODAL & EXIT COUNTER
+    // SECURITY PASSWORD PROMPT
     // ==========================================
 
-    private boolean showLoginDialog() {
-        while (true) {
-            Stage loginStage = new Stage();
-            loginStage.initModality(Modality.APPLICATION_MODAL);
-            loginStage.setTitle("TE Skill Matrix - Authentication");
-            loginStage.setResizable(false);
+    private boolean promptAdminPassword(String actionDescription) {
+        Dialog<String> passwordDialog = new Dialog<>();
+        passwordDialog.setTitle("Admin Security Check");
+        passwordDialog.setHeaderText("🔒 Admin Password Required\nAction: " + actionDescription);
 
-            final boolean[] success = { false };
-            final boolean[] failedAttempt = { false };
+        ButtonType confirmButtonType = new ButtonType("Authorize", ButtonBar.ButtonData.OK_DONE);
+        passwordDialog.getDialogPane().getButtonTypes().addAll(confirmButtonType, ButtonType.CANCEL);
 
-            GridPane grid = new GridPane();
-            grid.setHgap(10);
-            grid.setVgap(12);
-            grid.setPadding(new Insets(20));
+        GridPane grid = new GridPane();
+        grid.setHgap(10);
+        grid.setVgap(10);
+        grid.setPadding(new Insets(20));
 
-            Label headerLabel = new Label("Please sign in with your credentials");
-            headerLabel.setStyle("-fx-font-weight: bold; -fx-font-size: 14px;");
+        PasswordField passwordInput = new PasswordField();
+        passwordInput.setPromptText("Admin Password");
 
-            TextField username = new TextField();
-            username.setPromptText("Username");
+        grid.add(new Label("Password:"), 0, 0);
+        grid.add(passwordInput, 1, 0);
 
-            PasswordField password = new PasswordField();
-            password.setPromptText("Password");
+        passwordDialog.getDialogPane().setContent(grid);
+        passwordDialog.setResultConverter(
+                dialogButton -> dialogButton == confirmButtonType ? passwordInput.getText().trim() : null);
 
-            grid.add(headerLabel, 0, 0, 2, 1);
-            grid.add(new Label("Username:"), 0, 1);
-            grid.add(username, 1, 1);
-            grid.add(new Label("Password:"), 0, 2);
-            grid.add(password, 1, 2);
-
-            Button loginBtn = new Button("Login");
-            loginBtn.setDefaultButton(true);
-
-            Button cancelBtn = new Button("Cancel");
-            cancelBtn.setCancelButton(true);
-
-            HBox buttonBox = new HBox(10, loginBtn, cancelBtn);
-            buttonBox.setAlignment(Pos.CENTER_RIGHT);
-
-            loginBtn.setOnAction(e -> {
-                try {
-                    DatabaseManager.UserSession session = dbManager.authenticate(username.getText().trim(),
-                            password.getText().trim());
-                    if (session != null) {
-                        currentUser = session.getUsername();
-                        userRole = session.getRole();
-                        success[0] = true;
-                    } else {
-                        failedAttempt[0] = true;
-                    }
-                } catch (SQLException ex) {
-                    System.err.println("[Auth Error] " + ex.getMessage());
-                    failedAttempt[0] = true;
-                }
-                loginStage.close();
-            });
-
-            cancelBtn.setOnAction(e -> loginStage.close());
-
-            VBox layout = new VBox(15, grid, buttonBox);
-            layout.setPadding(new Insets(15));
-            layout.setStyle("-fx-background-color: -fx-control-inner-background;");
-
-            Scene scene = new Scene(layout, 360, 200);
-            loginStage.setScene(scene);
-
-            loginStage.showAndWait();
-
-            // 1. Granted access
-            if (success[0]) {
+        Optional<String> result = passwordDialog.showAndWait();
+        if (result.isPresent()) {
+            if (dbManager.verifyAdminPassword(result.get())) {
                 return true;
-            }
-
-            // 2. Parity increments
-            if (failedAttempt[0]) {
-                exitCounter += 2; // Failed credential attempt
             } else {
-                exitCounter += 1; // User clicked Cancel or closed window ('X')
+                showFriendlyError("Access Denied", "Incorrect password entered. Action cancelled.");
             }
-
-            // 3. Parity Check: If ODD -> Terminate program instantly
-            evaluateExitCounter();
-
-            // 4. Parity Check: If EVEN -> Prompt error and display login again
-            showFriendlyError("Access Denied", "Invalid username or password. Please verify your credentials.");
         }
-    }
-
-    private void evaluateExitCounter() {
-        if (exitCounter % 2 != 0) {
-            System.exit(0);
-        }
+        return false;
     }
 
     // ==========================================
@@ -243,9 +183,6 @@ public class SkillMatrixApp extends Application {
             header.getChildren().add(fallbackLabel);
         }
 
-        userSessionLabel = new Label("👤 " + currentUser + " (" + userRole + ")");
-        userSessionLabel.getStyleClass().add("user-badge");
-
         Button logsBtn = new Button("📜 Logs");
         logsBtn.getStyleClass().add("btn-secondary");
         logsBtn.setOnAction(e -> showAuditLogsDialog());
@@ -264,21 +201,19 @@ public class SkillMatrixApp extends Application {
         searchBox.setAlignment(Pos.CENTER);
         searchBox.getStyleClass().add("search-box-container");
 
-        if ("ADMIN".equals(userRole)) {
-            Button addEmpBtn = new Button("+ Employee");
-            addEmpBtn.getStyleClass().add("btn-secondary");
-            addEmpBtn.setOnAction(e -> showAddEmployeeDialog());
+        Button addEmpBtn = new Button("+ Employee");
+        addEmpBtn.getStyleClass().add("btn-secondary");
+        addEmpBtn.setOnAction(e -> showAddEmployeeDialog());
 
-            Button removeEmpBtn = new Button("- Employee");
-            removeEmpBtn.getStyleClass().add("btn-danger");
-            removeEmpBtn.setOnAction(e -> handleRemoveSelectedEmployee());
+        Button removeEmpBtn = new Button("- Employee");
+        removeEmpBtn.getStyleClass().add("btn-danger");
+        removeEmpBtn.setOnAction(e -> handleRemoveSelectedEmployee());
 
-            Button addSkillBtn = new Button("+ Skill");
-            addSkillBtn.getStyleClass().add("btn-secondary");
-            addSkillBtn.setOnAction(e -> showAddSkillDialog());
+        Button addSkillBtn = new Button("+ Skill");
+        addSkillBtn.getStyleClass().add("btn-secondary");
+        addSkillBtn.setOnAction(e -> showAddSkillDialog());
 
-            searchBox.getChildren().addAll(addEmpBtn, removeEmpBtn, addSkillBtn);
-        }
+        searchBox.getChildren().addAll(addEmpBtn, removeEmpBtn, addSkillBtn);
 
         searchCategoryCombo = new ComboBox<>();
         searchCategoryCombo.getItems().addAll("All Fields", "Employee ID", "Name", "Area", "Team Leader", "Line Number",
@@ -294,11 +229,15 @@ public class SkillMatrixApp extends Application {
         Button searchBtn = new Button("Search");
         searchBtn.getStyleClass().add("btn-primary");
 
+        Button multiFilterBtn = new Button("🔍 Advanced Filters");
+        multiFilterBtn.getStyleClass().add("btn-secondary");
+        multiFilterBtn.setOnAction(e -> showAdvancedFilterDialog());
+
         Button clearBtn = new Button("Clear");
         clearBtn.getStyleClass().add("btn-secondary");
 
-        searchBox.getChildren().addAll(searchCategoryCombo, searchField, searchBtn, clearBtn);
-        header.getChildren().addAll(userSessionLabel, logsBtn, themeBtn, spacer, searchBox);
+        searchBox.getChildren().addAll(searchCategoryCombo, searchField, searchBtn, multiFilterBtn, clearBtn);
+        header.getChildren().addAll(logsBtn, themeBtn, spacer, searchBox);
 
         searchBtn.setOnAction(e -> executeSearch());
         searchField.setOnAction(e -> executeSearch());
@@ -315,9 +254,21 @@ public class SkillMatrixApp extends Application {
         VBox panel = new VBox();
         panel.getStyleClass().add("card-panel");
 
-        Label headerLabel = new Label("SEARCH RESULTS");
-        headerLabel.getStyleClass().add("panel-header-label");
-        headerLabel.setMaxWidth(Double.MAX_VALUE);
+        HBox headerContainer = new HBox();
+        headerContainer.setAlignment(Pos.CENTER_LEFT);
+        headerContainer.getStyleClass().add("panel-header-label");
+
+        Label titleLabel = new Label("SEARCH RESULTS");
+        titleLabel.setFont(Font.font("Arial", FontWeight.BOLD, 14));
+
+        Region spacer = new Region();
+        HBox.setHgrow(spacer, Priority.ALWAYS);
+
+        resultsHeaderLabel = new Label("Total Employees: 0");
+        resultsHeaderLabel.setFont(Font.font("Arial", FontWeight.BOLD, 12));
+        resultsHeaderLabel.setStyle("-fx-padding: 0 10 0 0;");
+
+        headerContainer.getChildren().addAll(titleLabel, spacer, resultsHeaderLabel);
 
         employeeTable = new TableView<>();
         employeeData = FXCollections.observableArrayList();
@@ -330,10 +281,10 @@ public class SkillMatrixApp extends Application {
         TableColumn<EmployeeRecord, String> nameCol = new TableColumn<>("Name");
         nameCol.setCellValueFactory(new PropertyValueFactory<>("name"));
 
-        TableColumn<EmployeeRecord, String> areaCol = new TableColumn<>("Area");
-        areaCol.setCellValueFactory(new PropertyValueFactory<>("area"));
+        TableColumn<EmployeeRecord, String> leaderCol = new TableColumn<>("Team Leader");
+        leaderCol.setCellValueFactory(new PropertyValueFactory<>("leader"));
 
-        employeeTable.getColumns().addAll(List.of(idCol, nameCol, areaCol));
+        employeeTable.getColumns().addAll(List.of(idCol, nameCol, leaderCol));
         employeeTable.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY_FLEX_LAST_COLUMN);
 
         employeeTable.getSelectionModel().selectedItemProperty().addListener((obs, oldSelection, newSelection) -> {
@@ -341,15 +292,13 @@ public class SkillMatrixApp extends Application {
                 loadEmployeeDetails(newSelection);
         });
 
-        if ("ADMIN".equals(userRole)) {
-            ContextMenu cm = new ContextMenu();
-            MenuItem removeItem = new MenuItem("🗑️ Remove Selected Employee");
-            removeItem.setOnAction(e -> handleRemoveSelectedEmployee());
-            cm.getItems().add(removeItem);
-            employeeTable.setContextMenu(cm);
-        }
+        ContextMenu cm = new ContextMenu();
+        MenuItem removeItem = new MenuItem("🗑️ Remove Selected Employee");
+        removeItem.setOnAction(e -> handleRemoveSelectedEmployee());
+        cm.getItems().add(removeItem);
+        employeeTable.setContextMenu(cm);
 
-        panel.getChildren().addAll(headerLabel, employeeTable);
+        panel.getChildren().addAll(headerContainer, employeeTable);
         return panel;
     }
 
@@ -373,12 +322,10 @@ public class SkillMatrixApp extends Application {
 
         profileHeaderBox.getChildren().addAll(profileHeader, profileSpacer);
 
-        if ("ADMIN".equals(userRole)) {
-            Button removeProfileBtn = new Button("🗑️ Remove");
-            removeProfileBtn.getStyleClass().add("btn-danger");
-            removeProfileBtn.setOnAction(e -> handleRemoveSelectedEmployee());
-            profileHeaderBox.getChildren().add(removeProfileBtn);
-        }
+        Button removeProfileBtn = new Button("🗑️ Remove");
+        removeProfileBtn.getStyleClass().add("btn-danger");
+        removeProfileBtn.setOnAction(e -> handleRemoveSelectedEmployee());
+        profileHeaderBox.getChildren().add(removeProfileBtn);
 
         HBox profileInfo = new HBox(20);
         profileInfo.setPadding(new Insets(10, 20, 0, 20));
@@ -420,6 +367,9 @@ public class SkillMatrixApp extends Application {
         skillsTable.setItems(skillsData);
         VBox.setVgrow(skillsTable, Priority.ALWAYS);
 
+        TableColumn<SkillRecord, String> areaCol = new TableColumn<>("Area");
+        areaCol.setCellValueFactory(new PropertyValueFactory<>("area"));
+
         TableColumn<SkillRecord, String> lineCol = new TableColumn<>("Line Number");
         lineCol.setCellValueFactory(new PropertyValueFactory<>("lineNumber"));
 
@@ -429,7 +379,7 @@ public class SkillMatrixApp extends Application {
         TableColumn<SkillRecord, String> levelCol = new TableColumn<>("Skill Level");
         levelCol.setCellValueFactory(new PropertyValueFactory<>("level"));
 
-        skillsTable.getColumns().addAll(List.of(lineCol, stationCol, levelCol));
+        skillsTable.getColumns().addAll(List.of(areaCol, lineCol, stationCol, levelCol));
         skillsTable.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY_FLEX_LAST_COLUMN);
 
         skillsTable.setRowFactory(tv -> {
@@ -453,7 +403,7 @@ public class SkillMatrixApp extends Application {
         footer.getStyleClass().add("header-bar");
         footer.setPadding(new Insets(5, 15, 5, 15));
 
-        statusLabel = new Label("Database Connected | Active User: " + currentUser);
+        statusLabel = new Label("Database Connected");
         statusLabel.setFont(Font.font("Arial", 12));
         footer.getChildren().add(statusLabel);
         return footer;
@@ -467,6 +417,19 @@ public class SkillMatrixApp extends Application {
         String keyword = searchField != null ? searchField.getText().trim() : "";
         String searchType = searchCategoryCombo != null ? searchCategoryCombo.getValue() : "All Fields";
 
+        activeLineFilter = null;
+        activeStationFilter = null;
+        activeLevelFilter = null;
+
+        if (!keyword.isEmpty()) {
+            if ("Line Number".equals(searchType))
+                activeLineFilter = keyword;
+            else if ("Station".equals(searchType))
+                activeStationFilter = keyword;
+            else if ("Skill Level".equals(searchType))
+                activeLevelFilter = keyword;
+        }
+
         if (employeeData != null)
             employeeData.clear();
         clearProfileFields();
@@ -475,9 +438,12 @@ public class SkillMatrixApp extends Application {
             List<EmployeeRecord> results = dbManager.searchEmployees(keyword, searchType);
             employeeData.addAll(results);
 
+            if (resultsHeaderLabel != null) {
+                resultsHeaderLabel.setText("Total Employees: " + results.size());
+            }
+
             if (statusLabel != null) {
-                statusLabel
-                        .setText("✅ Found " + results.size() + " employees matching criteria | Active: " + currentUser);
+                statusLabel.setText("✅ Found " + results.size() + " employees matching criteria");
             }
             if (employeeTable != null && !employeeData.isEmpty()) {
                 employeeTable.getSelectionModel().selectFirst();
@@ -487,6 +453,86 @@ public class SkillMatrixApp extends Application {
             e.printStackTrace();
             showFriendlyError("Search Error", "Unable to retrieve employee records. Please try refining your query.");
         }
+    }
+
+    private void showAdvancedFilterDialog() {
+        Stage dialog = new Stage();
+        dialog.initModality(Modality.APPLICATION_MODAL);
+        dialog.setTitle("Advanced Multi-Filter Search");
+
+        GridPane grid = new GridPane();
+        grid.setPadding(new Insets(20));
+        grid.setVgap(12);
+        grid.setHgap(10);
+
+        TextField idInput = createDialogField("e.g. TE307569");
+        TextField nameInput = createDialogField("e.g. HALIMA");
+        TextField leaderInput = createDialogField("e.g. HAMZA");
+        TextField areaInput = createDialogField("e.g. Area 1");
+        TextField lineInput = createDialogField("e.g. A1014280");
+        TextField stationInput = createDialogField("e.g. Assemblage");
+        TextField levelInput = createDialogField("e.g. 4");
+
+        grid.addRow(0, createTitleLabel("Employee ID:"), idInput);
+        grid.addRow(1, createTitleLabel("Full Name:"), nameInput);
+        grid.addRow(2, createTitleLabel("Team Leader:"), leaderInput);
+        grid.addRow(3, createTitleLabel("Area:"), areaInput);
+        grid.addRow(4, createTitleLabel("Line Number:"), lineInput);
+        grid.addRow(5, createTitleLabel("Station:"), stationInput);
+        grid.addRow(6, createTitleLabel("Skill Level:"), levelInput);
+
+        Button applyBtn = new Button("Apply Combined Filters");
+        applyBtn.getStyleClass().add("btn-primary");
+
+        applyBtn.setOnAction(e -> {
+            if (employeeData != null)
+                employeeData.clear();
+            clearProfileFields();
+
+            activeLineFilter = lineInput.getText().trim();
+            activeStationFilter = stationInput.getText().trim();
+            activeLevelFilter = levelInput.getText().trim();
+
+            try {
+                List<EmployeeRecord> results = dbManager.searchEmployeesMultiFilter(
+                        idInput.getText(),
+                        nameInput.getText(),
+                        leaderInput.getText(),
+                        areaInput.getText(),
+                        lineInput.getText(),
+                        stationInput.getText(),
+                        levelInput.getText());
+
+                employeeData.addAll(results);
+
+                if (resultsHeaderLabel != null) {
+                    resultsHeaderLabel.setText("Total Employees: " + results.size());
+                }
+
+                if (statusLabel != null) {
+                    statusLabel.setText("✅ Filter applied | Found " + results.size() + " matching employees");
+                }
+
+                if (employeeTable != null && !employeeData.isEmpty()) {
+                    employeeTable.getSelectionModel().selectFirst();
+                }
+
+                dialog.close();
+            } catch (SQLException ex) {
+                System.err.println("[Multi-Filter Error] " + ex.getMessage());
+                ex.printStackTrace();
+                showFriendlyError("Filter Error", "Could not execute advanced query.");
+            }
+        });
+
+        VBox layout = new VBox(15, grid, applyBtn);
+        layout.setAlignment(Pos.CENTER);
+        layout.setPadding(new Insets(10));
+        layout.getStyleClass().addAll("root-container", isDarkMode ? "theme-dark" : "theme-light");
+
+        Scene scene = new Scene(layout, 450, 420);
+        dialog.setScene(scene);
+        dialog.showAndWait();
     }
 
     private void loadEmployeeDetails(EmployeeRecord emp) {
@@ -507,7 +553,12 @@ public class SkillMatrixApp extends Application {
 
         skillsData.clear();
         try {
-            skillsData.addAll(dbManager.fetchEmployeeSkills(emp.getId()));
+            skillsData.addAll(dbManager.fetchEmployeeSkills(
+                    emp.getId(),
+                    activeLineFilter,
+                    activeStationFilter,
+                    activeLevelFilter));
+
             if (statusLabel != null)
                 statusLabel.setText("✅ Loaded profile for " + emp.getId());
         } catch (SQLException e) {
@@ -518,73 +569,37 @@ public class SkillMatrixApp extends Application {
     }
 
     private void handleRemoveSelectedEmployee() {
-        if (!"ADMIN".equals(userRole)) {
-            showFriendlyError("Access Denied", "Only administrative accounts can remove employee profiles.");
-            return;
-        }
-
         EmployeeRecord selected = employeeTable.getSelectionModel().getSelectedItem();
         if (selected == null) {
             showFriendlyError("Selection Required", "Please select an employee profile to remove.");
             return;
         }
 
-        Dialog<String> passwordDialog = new Dialog<>();
-        passwordDialog.setTitle("Security Check - Delete Employee");
-        passwordDialog.setHeaderText("⚠️ CAUTION: Deleting " + selected.getName() + " (" + selected.getId() + ")");
+        if (!promptAdminPassword("Remove employee " + selected.getName() + " (" + selected.getId() + ")")) {
+            return;
+        }
 
-        ButtonType confirmButtonType = new ButtonType("Confirm Delete", ButtonBar.ButtonData.OK_DONE);
-        passwordDialog.getDialogPane().getButtonTypes().addAll(confirmButtonType, ButtonType.CANCEL);
-
-        GridPane grid = new GridPane();
-        grid.setHgap(10);
-        grid.setVgap(10);
-        grid.setPadding(new Insets(20));
-
-        Label warningLabel = new Label(
-                "This action is permanent and removes all associated qualifications.\nEnter Admin Password:");
-        warningLabel.setWrapText(true);
-
-        PasswordField passwordInput = new PasswordField();
-        passwordInput.setPromptText("Admin Password");
-
-        grid.add(warningLabel, 0, 0, 2, 1);
-        grid.add(new Label("Password:"), 0, 1);
-        grid.add(passwordInput, 1, 1);
-
-        passwordDialog.getDialogPane().setContent(grid);
-        passwordDialog.setResultConverter(
-                dialogButton -> dialogButton == confirmButtonType ? passwordInput.getText().trim() : null);
-
-        Optional<String> result = passwordDialog.showAndWait();
-        if (result.isPresent()) {
-            try {
-                if (dbManager.verifyAdminPassword(result.get())) {
-                    boolean success = dbManager.deleteEmployeeTransaction(selected.getId());
-                    if (success) {
-                        dbManager.logAction(currentUser, "DELETE_EMPLOYEE",
-                                "Removed employee: " + selected.getId() + " (" + selected.getName() + ")");
-                        if (statusLabel != null)
-                            statusLabel.setText("✅ Removed employee: " + selected.getId());
-                        clearProfileFields();
-                        executeSearch();
-                    } else {
-                        showFriendlyError("Delete Failed", "The employee record could not be found in the system.");
-                    }
-                } else {
-                    showFriendlyError("Security Check Failed", "Incorrect password entered. Operation cancelled.");
-                }
-            } catch (SQLException e) {
-                System.err.println("[Delete Error] " + e.getMessage());
-                e.printStackTrace();
-                showFriendlyError("Database Error", "An error occurred while removing the employee record.");
+        try {
+            boolean success = dbManager.deleteEmployeeTransaction(selected.getId());
+            if (success) {
+                dbManager.logAction("ADMIN", "DELETE_EMPLOYEE",
+                        "Removed employee: " + selected.getId() + " (" + selected.getName() + ")");
+                if (statusLabel != null)
+                    statusLabel.setText("✅ Removed employee: " + selected.getId());
+                clearProfileFields();
+                executeSearch();
+            } else {
+                showFriendlyError("Delete Failed", "The employee record could not be found in the system.");
             }
+        } catch (SQLException e) {
+            System.err.println("[Delete Error] " + e.getMessage());
+            e.printStackTrace();
+            showFriendlyError("Database Error", "An error occurred while removing the employee record.");
         }
     }
 
     private void showAddEmployeeDialog() {
-        if (!"ADMIN".equals(userRole)) {
-            showFriendlyError("Access Denied", "Only administrative accounts can register employees.");
+        if (!promptAdminPassword("Add new employee")) {
             return;
         }
 
@@ -624,7 +639,7 @@ public class SkillMatrixApp extends Application {
             try {
                 dbManager.addEmployee(empId, empName, dateInput.getText().trim(),
                         areaInput.getText().trim().toUpperCase(), leaderInput.getText().trim().toUpperCase());
-                dbManager.logAction(currentUser, "ADD_EMPLOYEE", "Added employee ID: " + empId + " (" + empName + ")");
+                dbManager.logAction("ADMIN", "ADD_EMPLOYEE", "Added employee ID: " + empId + " (" + empName + ")");
                 statusLabel.setText("✅ Added employee: " + empId);
                 executeSearch();
                 dialog.close();
@@ -646,8 +661,7 @@ public class SkillMatrixApp extends Application {
     }
 
     private void showAddSkillDialog() {
-        if (!"ADMIN".equals(userRole)) {
-            showFriendlyError("Access Denied", "Only administrative accounts can add qualifications.");
+        if (!promptAdminPassword("Add new qualification/skill")) {
             return;
         }
 
@@ -664,6 +678,7 @@ public class SkillMatrixApp extends Application {
         if (idValue != null && !idValue.getText().isEmpty())
             idInput.setText(idValue.getText());
 
+        TextField areaInput = createDialogField("e.g., Area 1");
         TextField lineInput = createDialogField("e.g., A1959827");
         TextField stationInput = createDialogField("e.g., Assemblage Packaging");
 
@@ -692,10 +707,11 @@ public class SkillMatrixApp extends Application {
         HBox.setHgrow(certPathInput, Priority.ALWAYS);
 
         grid.addRow(0, createTitleLabel("Employee ID:"), idInput);
-        grid.addRow(1, createTitleLabel("Line Number:"), lineInput);
-        grid.addRow(2, createTitleLabel("Station:"), stationInput);
-        grid.addRow(3, createTitleLabel("Skill Level:"), levelCombo);
-        grid.addRow(4, createTitleLabel("Certificate:"), pathBox);
+        grid.addRow(1, createTitleLabel("Area:"), areaInput);
+        grid.addRow(2, createTitleLabel("Line Number:"), lineInput);
+        grid.addRow(3, createTitleLabel("Station:"), stationInput);
+        grid.addRow(4, createTitleLabel("Skill Level:"), levelCombo);
+        grid.addRow(5, createTitleLabel("Certificate:"), pathBox);
 
         Button saveBtn = new Button("Save Qualification");
         saveBtn.getStyleClass().add("btn-primary");
@@ -703,7 +719,7 @@ public class SkillMatrixApp extends Application {
         saveBtn.setOnAction(e -> {
             String empId = idInput.getText().trim().toUpperCase();
             String station = stationInput.getText().trim();
-            String level = levelCombo.getValue();
+            String area = areaInput.getText().trim();
 
             if (empId.isEmpty() || station.isEmpty()) {
                 showFriendlyError("Validation Error", "Employee ID and Station are required.");
@@ -711,8 +727,9 @@ public class SkillMatrixApp extends Application {
             }
 
             try {
-                dbManager.addSkill(empId, lineInput.getText().trim(), station, level, certPathInput.getText().trim());
-                dbManager.logAction(currentUser, "ADD_SKILL", "Added skill '" + station + "' for: " + empId);
+                dbManager.addSkillWithArea(empId, area, lineInput.getText().trim(), station, levelCombo.getValue(),
+                        certPathInput.getText().trim());
+                dbManager.logAction("ADMIN", "ADD_SKILL", "Added skill '" + station + "' for: " + empId);
                 statusLabel.setText("✅ Added skill for: " + empId);
 
                 if (idValue != null && empId.equals(idValue.getText())) {
@@ -731,7 +748,7 @@ public class SkillMatrixApp extends Application {
         layout.setPadding(new Insets(10));
         layout.getStyleClass().addAll("root-container", isDarkMode ? "theme-dark" : "theme-light");
 
-        Scene scene = new Scene(layout, 500, 350);
+        Scene scene = new Scene(layout, 500, 380);
         dialog.setScene(scene);
         dialog.showAndWait();
     }
@@ -746,7 +763,7 @@ public class SkillMatrixApp extends Application {
             File file = new File(path);
             if (file.exists()) {
                 Desktop.getDesktop().open(file);
-                dbManager.logAction(currentUser, "VIEW_CERT", "Opened certificate: " + path);
+                dbManager.logAction("GUEST", "VIEW_CERT", "Opened certificate: " + path);
             } else {
                 showFriendlyError("File Not Found",
                         "The requested document file could not be located at the target path.");
@@ -889,13 +906,18 @@ public class SkillMatrixApp extends Application {
     }
 
     public static class SkillRecord {
-        private final SimpleStringProperty lineNumber, station, level, certPath;
+        private final SimpleStringProperty area, lineNumber, station, level, certPath;
 
-        public SkillRecord(String lineNumber, String station, String level, String certPath) {
+        public SkillRecord(String area, String lineNumber, String station, String level, String certPath) {
+            this.area = new SimpleStringProperty(area != null ? area : "N/A");
             this.lineNumber = new SimpleStringProperty(lineNumber);
             this.station = new SimpleStringProperty(station);
             this.level = new SimpleStringProperty(level);
             this.certPath = new SimpleStringProperty(certPath);
+        }
+
+        public String getArea() {
+            return area.get();
         }
 
         public String getLineNumber() {

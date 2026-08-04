@@ -1,188 +1,92 @@
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.IOException;
+import java.io.InputStream;
 import java.sql.*;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Properties;
 
 public class DatabaseManager {
 
-    private static final String DB_URL = "jdbc:sqlite:master_skills_data_clean2.db";
+    private String dbUrl;
 
     public DatabaseManager() {
-        initSchema();
+        loadConfiguration();
+        ensureDatabaseSchema();
+    }
+
+    private void loadConfiguration() {
+        Properties props = new Properties();
+        File configFile = new File("config.properties");
+
+        if (configFile.exists()) {
+            try (InputStream input = new FileInputStream(configFile)) {
+                props.load(input);
+                dbUrl = props.getProperty("db.url", "jdbc:sqlite:master_skills_data_clean2.db");
+            } catch (IOException ex) {
+                System.err.println("[Config Warning] Failed to read config.properties. Falling back to default DB.");
+                dbUrl = "jdbc:sqlite:master_skills_data_clean2.db";
+            }
+        } else {
+            dbUrl = "jdbc:sqlite:master_skills_data_clean2.db";
+        }
     }
 
     private Connection getConnection() throws SQLException {
-        return DriverManager.getConnection(DB_URL);
+        return DriverManager.getConnection(dbUrl);
     }
 
-    // ==========================================
-    // SCHEMA INITIALIZATION & SEEDING
-    // ==========================================
-
-    private void initSchema() {
+    public void ensureDatabaseSchema() {
         try (Connection conn = getConnection();
                 Statement stmt = conn.createStatement()) {
 
-            // 1. Qualifications Table Patch
             try {
                 stmt.execute("ALTER TABLE Qualifications ADD COLUMN cert_path TEXT");
             } catch (SQLException ignored) {
-                // Column already exists
             }
 
-            // 2. Audit Logs Table
-            stmt.execute("CREATE TABLE IF NOT EXISTS AuditLogs (" +
+            try {
+                stmt.execute("ALTER TABLE Qualifications ADD COLUMN area TEXT");
+            } catch (SQLException ignored) {
+            }
+
+            String createLogTable = "CREATE TABLE IF NOT EXISTS AuditLogs (" +
                     "log_id INTEGER PRIMARY KEY AUTOINCREMENT, " +
                     "timestamp TEXT NOT NULL, " +
                     "user_id TEXT NOT NULL, " +
                     "action_type TEXT NOT NULL, " +
                     "description TEXT NOT NULL" +
-                    ");");
-
-            // 3. Hashed Credentials Users Table
-            stmt.execute("CREATE TABLE IF NOT EXISTS Users (" +
-                    "username TEXT PRIMARY KEY, " +
-                    "password_hash TEXT NOT NULL, " +
-                    "role TEXT NOT NULL" +
-                    ");");
-
-            seedDefaultUsers(conn);
+                    ");";
+            stmt.execute(createLogTable);
 
         } catch (SQLException e) {
-            System.err.println("[DatabaseManager] Schema initialization failed: " + e.getMessage());
-            e.printStackTrace();
-        }
-    }
-
-    private void seedDefaultUsers(Connection conn) throws SQLException {
-        String checkSql = "SELECT COUNT(*) FROM Users";
-        try (Statement stmt = conn.createStatement();
-                ResultSet rs = stmt.executeQuery(checkSql)) {
-            if (rs.next() && rs.getInt(1) == 0) {
-                String insertSql = "INSERT INTO Users (username, password_hash, role) VALUES (?, ?, ?)";
-                try (PreparedStatement pstmt = conn.prepareStatement(insertSql)) {
-                    // Seed Admin (admin / admin123)
-                    pstmt.setString(1, "ADMIN");
-                    pstmt.setString(2, hashPassword("admin123"));
-                    pstmt.setString(3, "ADMIN");
-                    pstmt.executeUpdate();
-
-                    // Seed Operator (operator / user123)
-                    pstmt.setString(1, "OPERATOR");
-                    pstmt.setString(2, hashPassword("user123"));
-                    pstmt.setString(3, "OPERATOR");
-                    pstmt.executeUpdate();
-                }
-            }
+            System.err.println("[DB Init Error] Could not verify/update database schema: " + e.getMessage());
         }
     }
 
     // ==========================================
-    // SECURITY & AUTHENTICATION
+    // AUTHENTICATION & SECURITY
     // ==========================================
 
-    public static String hashPassword(String password) {
-        try {
-            MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            byte[] encodedhash = digest.digest(password.getBytes(StandardCharsets.UTF_8));
-            StringBuilder hexString = new StringBuilder(2 * encodedhash.length);
-            for (byte b : encodedhash) {
-                String hex = Integer.toHexString(0xff & b);
-                if (hex.length() == 1)
-                    hexString.append('0');
-                hexString.append(hex);
-            }
-            return hexString.toString();
-        } catch (NoSuchAlgorithmException e) {
-            throw new RuntimeException("SHA-256 algorithm unavailable", e);
-        }
-    }
-
-    public UserSession authenticate(String username, String password) throws SQLException {
-        String sql = "SELECT role FROM Users WHERE UPPER(username) = ? AND password_hash = ?";
-        String hashed = hashPassword(password);
-
-        try (Connection conn = getConnection();
-                PreparedStatement pstmt = conn.prepareStatement(sql)) {
-            pstmt.setString(1, username.toUpperCase().trim());
-            pstmt.setString(2, hashed);
-
-            try (ResultSet rs = pstmt.executeQuery()) {
-                if (rs.next()) {
-                    String role = rs.getString("role");
-                    String sessionName = role.equals("ADMIN") ? "ADMIN_" + username.toUpperCase()
-                            : username.toUpperCase();
-                    return new UserSession(sessionName, role);
-                }
-            }
-        }
-        return null;
-    }
-
-    public boolean verifyAdminPassword(String password) throws SQLException {
-        String sql = "SELECT COUNT(*) FROM Users WHERE role = 'ADMIN' AND password_hash = ?";
-        try (Connection conn = getConnection();
-                PreparedStatement pstmt = conn.prepareStatement(sql)) {
-            pstmt.setString(1, hashPassword(password));
-            try (ResultSet rs = pstmt.executeQuery()) {
-                return rs.next() && rs.getInt(1) > 0;
-            }
-        }
+    public boolean verifyAdminPassword(String password) {
+        return "admin123".equals(password != null ? password.trim() : "");
     }
 
     // ==========================================
-    // AUDIT LOGGING DAO
-    // ==========================================
-
-    public void logAction(String userId, String actionType, String description) {
-        String sql = "INSERT INTO AuditLogs (timestamp, user_id, action_type, description) VALUES (?, ?, ?, ?)";
-        String timestamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
-
-        try (Connection conn = getConnection();
-                PreparedStatement pstmt = conn.prepareStatement(sql)) {
-            pstmt.setString(1, timestamp);
-            pstmt.setString(2, userId != null ? userId : "UNKNOWN");
-            pstmt.setString(3, actionType);
-            pstmt.setString(4, description);
-            pstmt.executeUpdate();
-        } catch (SQLException e) {
-            System.err.println("[DatabaseManager] Audit log insert failed: " + e.getMessage());
-        }
-    }
-
-    public List<SkillMatrixApp.LogRecord> fetchAuditLogs() throws SQLException {
-        List<SkillMatrixApp.LogRecord> logs = new ArrayList<>();
-        String sql = "SELECT timestamp, user_id, action_type, description FROM AuditLogs ORDER BY log_id DESC";
-
-        try (Connection conn = getConnection();
-                Statement stmt = conn.createStatement();
-                ResultSet rs = stmt.executeQuery(sql)) {
-            while (rs.next()) {
-                logs.add(new SkillMatrixApp.LogRecord(
-                        rs.getString("timestamp"),
-                        rs.getString("user_id"),
-                        rs.getString("action_type"),
-                        rs.getString("description")));
-            }
-        }
-        return logs;
-    }
-
-    // ==========================================
-    // EMPLOYEE & SKILL OPERATIONS
+    // SEARCH & DATA RETRIEVAL
     // ==========================================
 
     public List<SkillMatrixApp.EmployeeRecord> searchEmployees(String keyword, String searchType) throws SQLException {
-        List<SkillMatrixApp.EmployeeRecord> results = new ArrayList<>();
+        List<SkillMatrixApp.EmployeeRecord> list = new ArrayList<>();
+
         String sqlBase = "SELECT DISTINCT e.id, e.name, e.area, e.employment_date, e.team_leader " +
                 "FROM Employees e LEFT JOIN Qualifications q ON e.id = q.employee_id ";
         String sqlWhere;
 
-        if (keyword.isEmpty()) {
+        if (keyword == null || keyword.isEmpty()) {
             sqlWhere = "WHERE 1=1";
         } else {
             switch (searchType) {
@@ -193,7 +97,7 @@ public class DatabaseManager {
                     sqlWhere = "WHERE e.name LIKE ?";
                     break;
                 case "Area":
-                    sqlWhere = "WHERE e.area LIKE ?";
+                    sqlWhere = "WHERE e.area LIKE ? OR q.area LIKE ?";
                     break;
                 case "Team Leader":
                     sqlWhere = "WHERE e.team_leader LIKE ?";
@@ -207,49 +111,149 @@ public class DatabaseManager {
                 case "Skill Level":
                     sqlWhere = "WHERE q.qualification_level LIKE ?";
                     break;
+                case "All Fields":
                 default:
-                    sqlWhere = "WHERE e.id LIKE ? OR e.name LIKE ? OR e.area LIKE ? " +
-                            "OR e.team_leader LIKE ? OR q.line_number LIKE ? " +
-                            "OR q.station LIKE ? OR q.qualification_level LIKE ?";
+                    sqlWhere = "WHERE e.id LIKE ? OR e.name LIKE ? OR e.area LIKE ? OR e.team_leader LIKE ? " +
+                            "OR q.line_number LIKE ? OR q.station LIKE ? OR q.qualification_level LIKE ? OR q.area LIKE ?";
                     break;
             }
         }
 
-        try (Connection conn = getConnection();
-                PreparedStatement pstmt = conn.prepareStatement(sqlBase + sqlWhere)) {
+        String sql = sqlBase + sqlWhere + " ORDER BY e.id ASC";
 
-            if (!keyword.isEmpty()) {
-                String pattern = "%" + keyword + "%";
-                if ("All Fields".equals(searchType) || searchType == null) {
-                    for (int i = 1; i <= 7; i++)
-                        pstmt.setString(i, pattern);
+        try (Connection conn = getConnection();
+                PreparedStatement pstmt = conn.prepareStatement(sql)) {
+
+            if (keyword != null && !keyword.isEmpty()) {
+                String searchPattern = "%" + keyword + "%";
+                if ("All Fields".equals(searchType)) {
+                    for (int i = 1; i <= 8; i++)
+                        pstmt.setString(i, searchPattern);
+                } else if ("Area".equals(searchType)) {
+                    pstmt.setString(1, searchPattern);
+                    pstmt.setString(2, searchPattern);
                 } else {
-                    pstmt.setString(1, pattern);
+                    pstmt.setString(1, searchPattern);
                 }
             }
 
             try (ResultSet rs = pstmt.executeQuery()) {
                 while (rs.next()) {
-                    results.add(new SkillMatrixApp.EmployeeRecord(
-                            rs.getString("id"), rs.getString("name"),
-                            rs.getString("area"), rs.getString("employment_date"),
+                    list.add(new SkillMatrixApp.EmployeeRecord(
+                            rs.getString("id"),
+                            rs.getString("name"),
+                            rs.getString("area"),
+                            rs.getString("employment_date"),
                             rs.getString("team_leader")));
                 }
             }
         }
-        return results;
+        return list;
     }
 
-    public List<SkillMatrixApp.SkillRecord> fetchEmployeeSkills(String empId) throws SQLException {
-        List<SkillMatrixApp.SkillRecord> skills = new ArrayList<>();
-        String sql = "SELECT line_number, station, qualification_level, cert_path FROM Qualifications WHERE employee_id = ?";
+    public List<SkillMatrixApp.EmployeeRecord> searchEmployeesMultiFilter(
+            String empId, String name, String teamLeader, String area,
+            String lineNumber, String station, String skillLevel) throws SQLException {
+
+        List<SkillMatrixApp.EmployeeRecord> list = new ArrayList<>();
+
+        StringBuilder sql = new StringBuilder(
+                "SELECT DISTINCT e.id, e.name, e.area, e.employment_date, e.team_leader " +
+                        "FROM Employees e LEFT JOIN Qualifications q ON e.id = q.employee_id WHERE 1=1 ");
+
+        List<Object> params = new ArrayList<>();
+
+        if (empId != null && !empId.trim().isEmpty()) {
+            sql.append("AND e.id LIKE ? ");
+            params.add("%" + empId.trim() + "%");
+        }
+        if (name != null && !name.trim().isEmpty()) {
+            sql.append("AND e.name LIKE ? ");
+            params.add("%" + name.trim() + "%");
+        }
+        if (teamLeader != null && !teamLeader.trim().isEmpty()) {
+            sql.append("AND e.team_leader LIKE ? ");
+            params.add("%" + teamLeader.trim() + "%");
+        }
+        if (area != null && !area.trim().isEmpty()) {
+            sql.append("AND (e.area LIKE ? OR q.area LIKE ?) ");
+            params.add("%" + area.trim() + "%");
+            params.add("%" + area.trim() + "%");
+        }
+        if (lineNumber != null && !lineNumber.trim().isEmpty()) {
+            sql.append("AND q.line_number LIKE ? ");
+            params.add("%" + lineNumber.trim() + "%");
+        }
+        if (station != null && !station.trim().isEmpty()) {
+            sql.append("AND q.station LIKE ? ");
+            params.add("%" + station.trim() + "%");
+        }
+        if (skillLevel != null && !skillLevel.trim().isEmpty()) {
+            sql.append("AND q.qualification_level LIKE ? ");
+            params.add("%" + skillLevel.trim() + "%");
+        }
+
+        sql.append("ORDER BY e.id ASC");
 
         try (Connection conn = getConnection();
-                PreparedStatement pstmt = conn.prepareStatement(sql)) {
-            pstmt.setString(1, empId);
+                PreparedStatement pstmt = conn.prepareStatement(sql.toString())) {
+
+            for (int i = 0; i < params.size(); i++) {
+                pstmt.setObject(i + 1, params.get(i));
+            }
+
             try (ResultSet rs = pstmt.executeQuery()) {
                 while (rs.next()) {
-                    skills.add(new SkillMatrixApp.SkillRecord(
+                    list.add(new SkillMatrixApp.EmployeeRecord(
+                            rs.getString("id"),
+                            rs.getString("name"),
+                            rs.getString("area"),
+                            rs.getString("employment_date"),
+                            rs.getString("team_leader")));
+                }
+            }
+        }
+        return list;
+    }
+
+    public List<SkillMatrixApp.SkillRecord> fetchEmployeeSkills(String empId, String lineNumberFilter,
+            String stationFilter, String levelFilter) throws SQLException {
+        List<SkillMatrixApp.SkillRecord> list = new ArrayList<>();
+
+        StringBuilder sql = new StringBuilder(
+                "SELECT COALESCE(q.area, e.area) AS line_area, q.line_number, q.station, q.qualification_level, q.cert_path "
+                        +
+                        "FROM Qualifications q " +
+                        "LEFT JOIN Employees e ON q.employee_id = e.id " +
+                        "WHERE q.employee_id = ? ");
+
+        List<Object> params = new ArrayList<>();
+        params.add(empId);
+
+        if (lineNumberFilter != null && !lineNumberFilter.trim().isEmpty()) {
+            sql.append("AND q.line_number LIKE ? ");
+            params.add("%" + lineNumberFilter.trim() + "%");
+        }
+        if (stationFilter != null && !stationFilter.trim().isEmpty()) {
+            sql.append("AND q.station LIKE ? ");
+            params.add("%" + stationFilter.trim() + "%");
+        }
+        if (levelFilter != null && !levelFilter.trim().isEmpty()) {
+            sql.append("AND q.qualification_level LIKE ? ");
+            params.add("%" + levelFilter.trim() + "%");
+        }
+
+        try (Connection conn = getConnection();
+                PreparedStatement pstmt = conn.prepareStatement(sql.toString())) {
+
+            for (int i = 0; i < params.size(); i++) {
+                pstmt.setObject(i + 1, params.get(i));
+            }
+
+            try (ResultSet rs = pstmt.executeQuery()) {
+                while (rs.next()) {
+                    list.add(new SkillMatrixApp.SkillRecord(
+                            rs.getString("line_area"),
                             rs.getString("line_number"),
                             rs.getString("station"),
                             rs.getString("qualification_level"),
@@ -257,8 +261,16 @@ public class DatabaseManager {
                 }
             }
         }
-        return skills;
+        return list;
     }
+
+    public List<SkillMatrixApp.SkillRecord> fetchEmployeeSkills(String empId) throws SQLException {
+        return fetchEmployeeSkills(empId, null, null, null);
+    }
+
+    // ==========================================
+    // DATA MODIFICATION TRANSACTIONS
+    // ==========================================
 
     public void addEmployee(String id, String name, String date, String area, String leader) throws SQLException {
         String sql = "INSERT INTO Employees (id, name, employment_date, area, team_leader) VALUES (?, ?, ?, ?, ?)";
@@ -273,59 +285,88 @@ public class DatabaseManager {
         }
     }
 
-    public void addSkill(String empId, String line, String station, String level, String certPath) throws SQLException {
-        String sql = "INSERT INTO Qualifications (employee_id, line_number, station, qualification_level, cert_path) VALUES (?, ?, ?, ?, ?)";
+    public void addSkill(String empId, String lineNumber, String station, String level, String certPath)
+            throws SQLException {
+        addSkillWithArea(empId, null, lineNumber, station, level, certPath);
+    }
+
+    public void addSkillWithArea(String empId, String area, String lineNumber, String station, String level,
+            String certPath) throws SQLException {
+        String sql = "INSERT INTO Qualifications (employee_id, area, line_number, station, qualification_level, cert_path) VALUES (?, ?, ?, ?, ?, ?)";
         try (Connection conn = getConnection();
                 PreparedStatement pstmt = conn.prepareStatement(sql)) {
             pstmt.setString(1, empId);
-            pstmt.setString(2, line);
-            pstmt.setString(3, station);
-            pstmt.setString(4, level);
-            pstmt.setString(5, certPath);
+            pstmt.setString(2, area);
+            pstmt.setString(3, lineNumber);
+            pstmt.setString(4, station);
+            pstmt.setString(5, level);
+            pstmt.setString(6, certPath);
             pstmt.executeUpdate();
         }
     }
 
     public boolean deleteEmployeeTransaction(String empId) throws SQLException {
-        String deleteQuals = "DELETE FROM Qualifications WHERE employee_id = ?";
-        String deleteEmp = "DELETE FROM Employees WHERE id = ?";
+        String deleteQualsSql = "DELETE FROM Qualifications WHERE employee_id = ?";
+        String deleteEmpSql = "DELETE FROM Employees WHERE id = ?";
 
         try (Connection conn = getConnection()) {
             conn.setAutoCommit(false);
-            try (PreparedStatement pQual = conn.prepareStatement(deleteQuals);
-                    PreparedStatement pEmp = conn.prepareStatement(deleteEmp)) {
+            try (PreparedStatement pstmtQual = conn.prepareStatement(deleteQualsSql);
+                    PreparedStatement pstmtEmp = conn.prepareStatement(deleteEmpSql)) {
 
-                pQual.setString(1, empId);
-                pQual.executeUpdate();
+                pstmtQual.setString(1, empId);
+                pstmtQual.executeUpdate();
 
-                pEmp.setString(1, empId);
-                int affected = pEmp.executeUpdate();
+                pstmtEmp.setString(1, empId);
+                int rowsAffected = pstmtEmp.executeUpdate();
 
                 conn.commit();
-                return affected > 0;
-            } catch (SQLException e) {
+                return rowsAffected > 0;
+            } catch (SQLException ex) {
                 conn.rollback();
-                throw e;
+                throw ex;
             }
         }
     }
 
-    // Helper Record Session DTO
-    public static class UserSession {
-        private final String username;
-        private final String role;
+    // ==========================================
+    // AUDIT LOGGING
+    // ==========================================
 
-        public UserSession(String username, String role) {
-            this.username = username;
-            this.role = role;
-        }
+    public void logAction(String userId, String actionType, String description) {
+        String sql = "INSERT INTO AuditLogs (timestamp, user_id, action_type, description) VALUES (?, ?, ?, ?)";
+        String timestamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
 
-        public String getUsername() {
-            return username;
-        }
+        try (Connection conn = getConnection();
+                PreparedStatement pstmt = conn.prepareStatement(sql)) {
 
-        public String getRole() {
-            return role;
+            pstmt.setString(1, timestamp);
+            pstmt.setString(2, userId != null ? userId : "SYSTEM");
+            pstmt.setString(3, actionType);
+            pstmt.setString(4, description);
+            pstmt.executeUpdate();
+
+        } catch (SQLException e) {
+            System.err.println("[Audit Error] Failed to write log record: " + e.getMessage());
         }
+    }
+
+    public List<SkillMatrixApp.LogRecord> fetchAuditLogs() throws SQLException {
+        List<SkillMatrixApp.LogRecord> list = new ArrayList<>();
+        String sql = "SELECT timestamp, user_id, action_type, description FROM AuditLogs ORDER BY log_id DESC";
+
+        try (Connection conn = getConnection();
+                Statement stmt = conn.createStatement();
+                ResultSet rs = stmt.executeQuery(sql)) {
+
+            while (rs.next()) {
+                list.add(new SkillMatrixApp.LogRecord(
+                        rs.getString("timestamp"),
+                        rs.getString("user_id"),
+                        rs.getString("action_type"),
+                        rs.getString("description")));
+            }
+        }
+        return list;
     }
 }
