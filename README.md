@@ -1,75 +1,122 @@
-# TE Connectivity - Skill Matrix Application 📊
+📊 TE Connectivity - Skill Matrix System
+========================================
 
-A desktop application developed with **JavaFX** and backed by an **SQLite** relational database. This application enables team leaders and plant operators to search, inspect, update, and trace manufacturing qualifications and skills across production lines.
+A desktop application designed to visualize, filter, and manage employee skill sets, qualifications, and certification logs with dynamic reporting and Excel export capabilities.
 
----
+✨ Features
+----------
 
-## 🌟 Key Features
+*   **🔍 Real-Time Search & Filtering:** Filter employees by ID, Name, Team Leader, Station, or Skill Level instantly across employee records.
+    
+*   **📂 Interactive Profile & Qualifications:** Select an employee to view detailed qualifications, associated line numbers, areas, and certification records.
+    
+*   **🌙 Dynamic Dark & Light Themes:** Toggle seamlessly between dark and light modes with custom CSS styling and adaptive top/bottom navigation bars.
+    
+*   **📊 Excel Data Export:** Export filtered search results and qualification summaries directly to .xlsx spreadsheet format using Apache POI.
+    
+*   **💾 Database Backend:** Lightweight SQLite database integration for local, fast, and robust data persistence.
+    
 
-* **Master-Detail View:** Easily browse and filter employee profiles on the left while dynamically inspecting qualifications, lines, and certification documents on the right.
-* **Audit & Traceability Logging:** Every critical action (login, record creation, certificate inspection) is automatically saved with timestamps to an `AuditLogs` SQLite table for full compliance tracking.
-* **Authentication & User Sessions:** Integrated role-aware login modal (`ADMIN` vs. `OPERATOR`) to trace system actions back to specific active users.
-* **Certificate Document Viewer:** Double-click any qualification entry to instantly launch attached PDF/image certifications via the system's default desktop viewer.
-* **Adaptive Light/Dark Theme:** Real-time theme toggling designed with modern styling variables.
+🛠️ Project Structure
+---------------------
 
----
+*   **bin/**: Compiled Java bytecode (.class files).
+    
+*   **lib/**: External library dependencies (sqlite-jdbc, poi, commons-io, etc.).
+    
+*   **master\_skills\_data\_clean2.db**: Local SQLite database storing employees and qualifications.
+    
+*   **SkillMatrixApp.java**: Main JavaFX user interface and view logic.
+    
+*   **DatabaseManager.java**: Query execution and database handler.
+    
+*   **DatabaseMigration.java**: Schema migration utility.
+    
+*   **styles.css**: Global stylesheet for Light and Dark themes.
+    
+*   **Dark\_mode\_bg.png / Light\_mode\_bg.png**: Theme background graphics.
+    
+*   **TE\_Connectivity\_logo.png**: Branding asset.
+    
+*   **SkillMatrixApp.jar**: Packaged Java archive.
+    
+*   **SkillMatrix.exe**: Executable wrapper.
+    
+*   **installer.iss**: Windows installer compilation script.
+    
+*   **README.md**: Project documentation.
+    
 
-## 🛠️ Project Structure
-
-```text
-TE-Skill-Matrix-App/
-├── SkillMatrixApp.java         # Main JavaFX Application & UI
-├── DatabaseMigration.java      # Schema migration helper utilities
-├── TE_Connectivity_logo.png    # Header branding asset
-├── build.xml                   # Build configuration
-└── .gitignore                  # Git tracking rules (excludes DB and local binaries)
-```
-
----
-
-## 🚀 Getting Started
+🚀 Getting Started
+------------------
 
 ### Prerequisites
 
-1. **Java Development Kit (JDK 17+ or 21+):**
-   * Recommended: Azul Zulu JDK with JavaFX (bundled with JavaFX support out of the box).
-2. **SQLite JDBC Driver:**
-   * Download `sqlite-jdbc-3.x.x.jar` (e.g., SQLite JDBC Releases).
+*   **Java Development Kit (JDK):** JDK 17 or higher (with JavaFX included).
+    
+*   **VS Code / IDE:** Configured with Java Extension Pack (or any preferred Java IDE).
+    
 
----
+💻 Manual Compilation & Execution
+---------------------------------
 
-## ⚙️ IDE Setup Instructions (VS Code / Antigravity)
+To compile and launch the application directly from the terminal or PowerShell:
 
-1. **Clone the Repository:**
-   ```bash
-   git clone [https://github.com/your-username/TE-Skill-Matrix-App.git](https://github.com/your-username/TE-Skill-Matrix-App.git)
-   cd TE-Skill-Matrix-App
-   ```
+### 1\. Compile Java Source Files
 
-2. **Add SQLite Driver to Classpath:**
-   * Open the project in your IDE.
-   * Locate the **Java Projects** tab in the sidebar.
-   * Scroll down to **Referenced Libraries** and click **`+`**.
-   * Select your local `sqlite-jdbc-*.jar` file to add it to the build path.
+javac -d bin -cp "lib/\*" DatabaseManager.java SkillMatrixApp.java
 
-3. **Run the Application:**
-   * Open `SkillMatrixApp.java`.
-   * Click **Run** or use `F5`.
+### 2\. Run the Application
 
----
+java -cp "bin;lib/\*" SkillMatrixApp
 
-## 🔐 Default Login Credentials
+📦 Building the Application (.jar & .exe)
+-----------------------------------------
 
-Upon launch, enter one of the built-in session credentials:
+### Step 1: Package into JAR
 
-| Role | Username | Password |
-| :--- | :--- | :--- |
-| **Administrator** | `admin` | `admin123` |
-| **Operator** | `operator` (or any username) | `user123` |
+Generate the standalone JAR file containing manifest entry points:jar cfe SkillMatrixApp.jar SkillMatrixApp -C bin .
 
----
+### Step 2: Wrap with Launch4j (.exe)
 
-## 🗄️ Database Auto-Initialization
+1.  Open **Launch4j**.
+    
+2.  Set **Output file** to SkillMatrix.exe.
+    
+3.  Set **Jar** to SkillMatrixApp.jar.
+    
+4.  In the **Classpath** tab:
+    
+    *   Main class: SkillMatrixApp
+        
+    *   Classpath: lib/\*
+        
+5.  Click **Build wrapper**.
+    
 
-* The SQLite database file (`master_skills_data_clean2.db`) is excluded from Git tracking for data privacy and security.
-* On first launch, `ensureDatabaseSchema()` will **automatically create** the local database file and generate the required `Qualifications` and `AuditLogs` schema tables.
+💿 Creating the Windows Installer
+---------------------------------
+
+This project uses **Inno Setup** to build a single installer executable (SkillMatrix\_Setup\_v1.0.exe).
+
+1.  Download and install Inno Setup.
+    
+2.  Open installer.iss in Inno Setup Compiler.
+    
+3.  Click **Compile (Ctrl + F9)**.
+    
+4.  The final installer executable will be generated inside the Output/ directory.
+    
+
+🎨 Technology Stack
+-------------------
+
+*   **UI Framework:** JavaFX
+    
+*   **Database:** SQLite JDBC
+    
+*   **Excel Engine:** Apache POI 5.x
+    
+*   **Styling:** CSS3 (JavaFX CSS Cascading System)
+    
+*   **Packaging:** Launch4j & Inno Setup
