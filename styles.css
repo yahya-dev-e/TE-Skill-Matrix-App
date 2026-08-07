@@ -52,9 +52,9 @@
     -fx-text-fill: #FFFFFF !important;
 }
 
-/* Light Mode Header & Footer (White Background) */
+/* Light Mode Header & Footer */
 .theme-light .header-bar {
-    -fx-background-color: rgba(255, 255, 255, 0.95);
+    -fx-background-color: rgba(255, 255, 255, 0.98);
     -fx-border-color: transparent transparent #DDDFE2 transparent;
     -fx-border-width: 0 0 1 0;
     -fx-effect: dropshadow(three-pass-box, rgba(0, 0, 0, 0.08), 5, 0, 0, 2);
@@ -98,7 +98,59 @@
 }
 
 /* ==========================================
-   4. CONTAINER & PANEL CARDS
+   4. DASHBOARD SPECIFIC STYLES
+   ========================================== */
+.dashboard-greeting {
+    -fx-font-size: 24px;
+    -fx-font-weight: bold;
+}
+
+.theme-dark .dashboard-greeting {
+    -fx-text-fill: #FFFFFF !important;
+}
+
+.theme-light .dashboard-greeting {
+    -fx-text-fill: #1C1E21 !important;
+}
+
+.metric-card-title {
+    -fx-font-size: 18px;
+    -fx-font-weight: bold;
+}
+
+.theme-dark .metric-card-title {
+    -fx-text-fill: #FFFFFF !important;
+}
+
+.theme-light .metric-card-title {
+    -fx-text-fill: #1C1E21 !important;
+}
+
+/* Pie Chart Labels & Legend Visibility Fixes */
+.theme-dark .chart-pie-label {
+    -fx-fill: #FFFFFF !important;
+    -fx-font-size: 11px;
+}
+
+.theme-light .chart-pie-label {
+    -fx-fill: #1C1E21 !important;
+    -fx-font-size: 11px;
+}
+
+.chart-legend {
+    -fx-background-color: transparent;
+}
+
+.theme-dark .chart-legend-item {
+    -fx-text-fill: #FFFFFF !important;
+}
+
+.theme-light .chart-legend-item {
+    -fx-text-fill: #1C1E21 !important;
+}
+
+/* ==========================================
+   5. CONTAINER & PANEL CARDS
    ========================================== */
 .card-panel {
     -fx-background-radius: 8;
@@ -118,7 +170,7 @@
 }
 
 /* ==========================================
-   5. TABLEVIEWS & CELLS
+   6. TABLEVIEWS & CELLS
    ========================================== */
 .table-view {
     -fx-background-color: transparent;
@@ -190,7 +242,7 @@
 }
 
 /* ==========================================
-   6. BUTTONS & INPUT FIELDS IN LIGHT/DARK
+   7. BUTTONS & INPUT FIELDS IN LIGHT/DARK
    ========================================== */
 .btn-primary {
     -fx-background-color: -theme-accent;
@@ -204,7 +256,6 @@
     -fx-background-color: -theme-accent-hover;
 }
 
-/* Secondary Buttons in Light Mode (Clean Light Grey with Dark Text) */
 .theme-light .btn-secondary {
     -fx-background-color: #E4E6EB;
     -fx-text-fill: #050505 !important;
@@ -216,7 +267,6 @@
     -fx-background-color: #D8DADF;
 }
 
-/* Secondary Buttons in Dark Mode */
 .theme-dark .btn-secondary {
     -fx-background-color: #3A3B3C;
     -fx-text-fill: #FFFFFF !important;
@@ -261,7 +311,7 @@
 }
 
 /* ==========================================
-   7. PROFILE DISPLAY CARDS
+   8. PROFILE DISPLAY CARDS
    ========================================== */
 .title-label {
     -fx-padding: 6 10;

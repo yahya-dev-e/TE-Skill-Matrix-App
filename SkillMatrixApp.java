@@ -5,6 +5,7 @@ import javafx.collections.ObservableList;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.Scene;
+import javafx.scene.chart.PieChart;
 import javafx.scene.control.*;
 import javafx.scene.control.cell.PropertyValueFactory;
 import javafx.scene.image.Image;
@@ -23,6 +24,7 @@ import java.io.File;
 import java.io.FileOutputStream;
 import java.sql.SQLException;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 // Apache POI Imports
@@ -39,15 +41,23 @@ public class SkillMatrixApp extends Application {
     private final DatabaseManager dbManager = new DatabaseManager();
 
     // Session State
-    private boolean isDarkMode = false;
+    private boolean isDarkMode = true;
+    private String currentUser = "admin";
 
     // Active qualification filter context
     private String activeLineFilter = null;
     private String activeStationFilter = null;
     private String activeLevelFilter = null;
 
-    // UI Structure
-    private BorderPane root;
+    // View Navigation Container
+    private StackPane rootStack;
+
+    // View Screens
+    private VBox loginView;
+    private BorderPane dashboardView;
+    private BorderPane mainMatrixView;
+
+    // Header & Controls
     private Button themeBtn;
     private TextField searchField;
     private ComboBox<String> searchCategoryCombo;
@@ -65,23 +75,13 @@ public class SkillMatrixApp extends Application {
 
     @Override
     public void start(Stage primaryStage) {
-        root = new BorderPane();
-        root.getStyleClass().add("root-container");
+        rootStack = new StackPane();
+        rootStack.getStyleClass().add("root-container");
 
-        SplitPane splitPane = new SplitPane();
-        splitPane.setStyle("-fx-background-color: transparent; -fx-padding: 15;");
+        // Build Login View Screen initially
+        buildLoginView();
 
-        VBox masterPanel = createMasterPanel();
-        VBox detailPanel = createDetailPanel();
-
-        splitPane.getItems().addAll(masterPanel, detailPanel);
-        splitPane.setDividerPositions(0.35);
-
-        root.setTop(createHeader());
-        root.setCenter(splitPane);
-        root.setBottom(createFooter());
-
-        Scene scene = new Scene(root, 1200, 800);
+        Scene scene = new Scene(rootStack, 1280, 800);
         try {
             var cssUrl = getClass().getResource("styles.css");
             if (cssUrl != null) {
@@ -103,12 +103,226 @@ public class SkillMatrixApp extends Application {
         primaryStage.setMaximized(true);
         primaryStage.show();
 
-        dbManager.logAction("GUEST", "SYSTEM", "Application started");
-        executeSearch();
+        rootStack.getChildren().add(loginView);
+        dbManager.logAction("SYSTEM", "START", "Application launched on login screen.");
     }
 
     // ==========================================
-    // SECURITY PASSWORD PROMPT (FOR ADMIN ACTIONS)
+    // 🔒 1. LOGIN SCREEN
+    // ==========================================
+
+    private void buildLoginView() {
+        loginView = new VBox(20);
+        loginView.setAlignment(Pos.CENTER);
+        loginView.setMaxSize(400, 480);
+        loginView.getStyleClass().add("card-panel");
+        loginView.setPadding(new Insets(35));
+
+        ImageView logoView = new ImageView();
+        try {
+            Image logoImage = new Image("file:TE_Connectivity_logo.png");
+            logoView.setImage(logoImage);
+            logoView.setFitWidth(180);
+            logoView.setPreserveRatio(true);
+        } catch (Exception ignored) {
+        }
+
+        Label titleLabel = new Label("Skill Matrix System");
+        titleLabel.setStyle("-fx-font-size: 22px; -fx-font-weight: bold;");
+
+        TextField usernameInput = new TextField();
+        usernameInput.setPromptText("Username");
+        usernameInput.getStyleClass().add("input-field");
+
+        PasswordField passwordInput = new PasswordField();
+        passwordInput.setPromptText("Password");
+        passwordInput.getStyleClass().add("input-field");
+
+        Label errorLabel = new Label();
+        errorLabel.setStyle("-fx-text-fill: #D9381E; -fx-font-weight: bold;");
+
+        Button loginBtn = new Button("Sign In");
+        loginBtn.getStyleClass().add("btn-primary");
+        loginBtn.setMaxWidth(Double.MAX_VALUE);
+        loginBtn.setStyle("-fx-font-size: 15px; -fx-padding: 10;");
+
+        loginBtn.setOnAction(e -> {
+            String user = usernameInput.getText().trim();
+            String pass = passwordInput.getText().trim();
+
+            if (dbManager.validateUser(user, pass)) {
+                currentUser = user.isEmpty() ? "admin" : user;
+                dbManager.logAction(currentUser, "LOGIN", "Successful login.");
+                showDashboardScreen();
+            } else {
+                errorLabel.setText("Invalid credentials (try admin / admin123)");
+            }
+        });
+
+        loginView.getChildren().addAll(logoView, titleLabel, usernameInput, passwordInput, loginBtn, errorLabel);
+    }
+
+    // ==========================================
+    // 📊 2. DASHBOARD ANALYTICS SCREEN
+    // ==========================================
+
+    private void showDashboardScreen() {
+        dashboardView = new BorderPane();
+
+        // Top Header Bar
+        HBox topHeader = new HBox(15);
+        topHeader.getStyleClass().add("header-bar");
+        topHeader.setPadding(new Insets(12, 25, 12, 25));
+        topHeader.setAlignment(Pos.CENTER_LEFT);
+
+        try {
+            Image logoImage = new Image("file:TE_Connectivity_logo.png");
+            ImageView logoView = new ImageView(logoImage);
+            logoView.setFitHeight(38);
+            logoView.setPreserveRatio(true);
+            topHeader.getChildren().add(logoView);
+        } catch (Exception e) {
+            Label brand = new Label("TE CONNECTIVITY");
+            brand.getStyleClass().add("panel-header-label");
+            topHeader.getChildren().add(brand);
+        }
+
+        Region headerSpacer = new Region();
+        HBox.setHgrow(headerSpacer, Priority.ALWAYS);
+
+        Button dashThemeBtn = new Button(isDarkMode ? "☀️ Light" : "🌙 Dark");
+        dashThemeBtn.getStyleClass().add("btn-secondary");
+        dashThemeBtn.setOnAction(e -> {
+            isDarkMode = !isDarkMode;
+            applyTheme();
+            dashThemeBtn.setText(isDarkMode ? "☀️ Light" : "🌙 Dark");
+        });
+
+        Button logoutBtn = new Button("Logout");
+        logoutBtn.getStyleClass().add("btn-danger");
+        logoutBtn.setOnAction(e -> {
+            dbManager.logAction(currentUser, "LOGOUT", "Logged out from application.");
+            rootStack.getChildren().clear();
+            rootStack.getChildren().add(loginView);
+        });
+
+        topHeader.getChildren().addAll(headerSpacer, dashThemeBtn, logoutBtn);
+        dashboardView.setTop(topHeader);
+
+        // Center Content Container
+        VBox contentBox = new VBox(25);
+        contentBox.setPadding(new Insets(25, 40, 25, 40));
+        contentBox.setAlignment(Pos.TOP_LEFT);
+
+        // Fixed Greeting
+        Label greetingLabel = new Label("Hello, " + currentUser);
+        greetingLabel.getStyleClass().add("dashboard-greeting");
+
+        // Cards Grid (Side-by-side)
+        HBox cardsBox = new HBox(35);
+        cardsBox.setAlignment(Pos.CENTER);
+
+        // CARD 1: Total Employees (% Women / % Men Count Pie Chart)
+        VBox empCard = new VBox(15);
+        empCard.getStyleClass().add("card-panel");
+        empCard.setPadding(new Insets(25));
+        empCard.setAlignment(Pos.CENTER);
+        HBox.setHgrow(empCard, Priority.ALWAYS);
+
+        int totalEmp = dbManager.getTotalEmployeesCount();
+        Label empTitle = new Label("Total Employees");
+        empTitle.getStyleClass().add("metric-card-title");
+
+        Label empCount = new Label(String.valueOf(totalEmp));
+        empCount.setStyle("-fx-font-size: 34px; -fx-font-weight: bold; -fx-text-fill: -theme-accent;");
+
+        PieChart genderChart = new PieChart();
+        Map<String, Integer> genderMap = dbManager.getGenderDistribution();
+
+        // Custom formatting: "145 Women" / "192 Men"
+        genderMap.forEach((gender, count) -> {
+            String sliceLabel = count + " " + gender;
+            genderChart.getData().add(new PieChart.Data(sliceLabel, count));
+        });
+        genderChart.setPrefSize(300, 220);
+        genderChart.setLegendVisible(true);
+
+        empCard.getChildren().addAll(empTitle, empCount, genderChart);
+
+        // CARD 2: Flexibility Rate Chart
+        VBox flexCard = new VBox(15);
+        flexCard.getStyleClass().add("card-panel");
+        flexCard.setPadding(new Insets(25));
+        flexCard.setAlignment(Pos.CENTER);
+        HBox.setHgrow(flexCard, Priority.ALWAYS);
+
+        double flexRate = dbManager.getFlexibilityRate();
+        Label flexTitle = new Label("Flexibility Rate");
+        flexTitle.getStyleClass().add("metric-card-title");
+
+        Label flexPercentage = new Label(String.format("%.1f%%", flexRate));
+        flexPercentage.setStyle("-fx-font-size: 34px; -fx-font-weight: bold; -fx-text-fill: -theme-accent;");
+
+        PieChart flexChart = new PieChart();
+        flexChart.getData().add(new PieChart.Data("Flexible", flexRate));
+        flexChart.getData().add(new PieChart.Data("Single Skill", 100.0 - flexRate));
+        flexChart.setPrefSize(300, 220);
+        flexChart.setLegendVisible(true);
+
+        flexCard.getChildren().addAll(flexTitle, flexPercentage, flexChart);
+
+        cardsBox.getChildren().addAll(empCard, flexCard);
+
+        // Centered Navigation Button
+        HBox btnContainer = new HBox();
+        btnContainer.setAlignment(Pos.CENTER);
+        Button matrixBtn = new Button("Skill Matrix ➔");
+        matrixBtn.getStyleClass().add("btn-primary");
+        matrixBtn.setStyle("-fx-font-size: 18px; -fx-padding: 12 45;");
+        matrixBtn.setOnAction(e -> showMainMatrixScreen());
+        btnContainer.getChildren().add(matrixBtn);
+
+        contentBox.getChildren().addAll(greetingLabel, cardsBox, btnContainer);
+        dashboardView.setCenter(contentBox);
+
+        rootStack.getChildren().clear();
+        rootStack.getChildren().add(dashboardView);
+    }
+
+    // ==========================================
+    // 📂 3. MAIN SKILL MATRIX SCREEN
+    // ==========================================
+
+    private void showMainMatrixScreen() {
+        if (mainMatrixView == null) {
+            mainMatrixView = new BorderPane();
+
+            SplitPane splitPane = new SplitPane();
+            splitPane.setStyle("-fx-background-color: transparent; -fx-padding: 15;");
+
+            VBox masterPanel = createMasterPanel();
+            VBox detailPanel = createDetailPanel();
+
+            splitPane.getItems().addAll(masterPanel, detailPanel);
+            splitPane.setDividerPositions(0.35);
+
+            mainMatrixView.setTop(createHeader());
+            mainMatrixView.setCenter(splitPane);
+            mainMatrixView.setBottom(createFooter());
+
+            executeSearch();
+        } else {
+            if (themeBtn != null) {
+                themeBtn.setText(isDarkMode ? "☀️ Light" : "🌙 Dark");
+            }
+        }
+
+        rootStack.getChildren().clear();
+        rootStack.getChildren().add(mainMatrixView);
+    }
+
+    // ==========================================
+    // SECURITY PASSWORD PROMPT
     // ==========================================
 
     private boolean promptAdminPassword(String actionDescription) {
@@ -150,11 +364,11 @@ public class SkillMatrixApp extends Application {
     // ==========================================
 
     private void applyTheme() {
-        root.getStyleClass().removeAll("theme-dark", "theme-light");
-        root.getStyleClass().add(isDarkMode ? "theme-dark" : "theme-light");
+        rootStack.getStyleClass().removeAll("theme-dark", "theme-light");
+        rootStack.getStyleClass().add(isDarkMode ? "theme-dark" : "theme-light");
 
         String bgImage = isDarkMode ? "Dark_mode_bg.png" : "Light_mode_bg.png";
-        root.setStyle("-fx-background-image: url('file:" + bgImage + "');");
+        rootStack.setStyle("-fx-background-image: url('file:" + bgImage + "');");
 
         if (themeBtn != null) {
             themeBtn.setText(isDarkMode ? "☀️ Light" : "🌙 Dark");
@@ -175,40 +389,44 @@ public class SkillMatrixApp extends Application {
     // ==========================================
 
     private HBox createHeader() {
-        HBox header = new HBox(15);
-        header.setPadding(new Insets(12, 20, 12, 20));
+        HBox header = new HBox(12);
+        header.setPadding(new Insets(10, 15, 10, 15));
         header.getStyleClass().add("header-bar");
         header.setAlignment(Pos.CENTER_LEFT);
+
+        Button backToDashBtn = new Button("⬅ Dashboard");
+        backToDashBtn.getStyleClass().add("btn-secondary");
+        backToDashBtn.setOnAction(e -> showDashboardScreen());
 
         try {
             Image logoImage = new Image("file:TE_Connectivity_logo.png");
             ImageView logoView = new ImageView(logoImage);
-            logoView.setFitHeight(40);
+            logoView.setFitHeight(36);
             logoView.setPreserveRatio(true);
-            header.getChildren().add(logoView);
+            header.getChildren().addAll(backToDashBtn, logoView);
         } catch (Exception e) {
             Label fallbackLabel = new Label("TE SKILL MATRIX");
             fallbackLabel.getStyleClass().add("panel-header-label");
-            header.getChildren().add(fallbackLabel);
+            header.getChildren().addAll(backToDashBtn, fallbackLabel);
         }
 
         Button logsBtn = new Button("📜 Logs");
         logsBtn.getStyleClass().add("btn-secondary");
         logsBtn.setOnAction(e -> showAuditLogsDialog());
 
-        Region spacer = new Region();
-        HBox.setHgrow(spacer, Priority.ALWAYS);
-
-        themeBtn = new Button();
+        themeBtn = new Button(isDarkMode ? "☀️ Light" : "🌙 Dark");
         themeBtn.getStyleClass().add("btn-secondary");
         themeBtn.setOnAction(e -> {
             isDarkMode = !isDarkMode;
             applyTheme();
+            themeBtn.setText(isDarkMode ? "☀️ Light" : "🌙 Dark");
         });
 
-        HBox searchBox = new HBox(8);
+        Region spacer = new Region();
+        HBox.setHgrow(spacer, Priority.ALWAYS);
+
+        HBox searchBox = new HBox(6);
         searchBox.setAlignment(Pos.CENTER);
-        searchBox.getStyleClass().add("search-box-container");
 
         Button addEmpBtn = new Button("+ Employee");
         addEmpBtn.getStyleClass().add("btn-secondary");
@@ -222,8 +440,6 @@ public class SkillMatrixApp extends Application {
         addSkillBtn.getStyleClass().add("btn-secondary");
         addSkillBtn.setOnAction(e -> showAddSkillDialog());
 
-        searchBox.getChildren().addAll(addEmpBtn, removeEmpBtn, addSkillBtn);
-
         searchCategoryCombo = new ComboBox<>();
         searchCategoryCombo.getItems().addAll("All Fields", "Employee ID", "Name", "Area", "Team Leader", "Line Number",
                 "Station", "Skill Level");
@@ -232,7 +448,7 @@ public class SkillMatrixApp extends Application {
 
         searchField = new TextField();
         searchField.setPromptText("Search anything...");
-        searchField.setPrefWidth(160);
+        searchField.setPrefWidth(150);
         searchField.getStyleClass().add("input-field");
 
         Button searchBtn = new Button("Search");
@@ -249,8 +465,8 @@ public class SkillMatrixApp extends Application {
         Button clearBtn = new Button("Clear");
         clearBtn.getStyleClass().add("btn-secondary");
 
-        searchBox.getChildren().addAll(searchCategoryCombo, searchField, searchBtn, multiFilterBtn, exportBtn,
-                clearBtn);
+        searchBox.getChildren().addAll(addEmpBtn, removeEmpBtn, addSkillBtn, searchCategoryCombo, searchField,
+                searchBtn, multiFilterBtn, exportBtn, clearBtn);
         header.getChildren().addAll(logsBtn, themeBtn, spacer, searchBox);
 
         searchBtn.setOnAction(e -> executeSearch());
@@ -337,19 +553,18 @@ public class SkillMatrixApp extends Application {
         Region profileSpacer = new Region();
         HBox.setHgrow(profileSpacer, Priority.ALWAYS);
 
-        profileHeaderBox.getChildren().addAll(profileHeader, profileSpacer);
-
         Button removeProfileBtn = new Button("🗑️ Remove");
         removeProfileBtn.getStyleClass().add("btn-danger");
         removeProfileBtn.setOnAction(e -> handleRemoveSelectedEmployee());
-        profileHeaderBox.getChildren().add(removeProfileBtn);
+
+        profileHeaderBox.getChildren().addAll(profileHeader, profileSpacer, removeProfileBtn);
 
         HBox profileInfo = new HBox(20);
         profileInfo.setPadding(new Insets(10, 20, 0, 20));
 
         StackPane avatarPane = new StackPane();
         Circle avatar = new Circle(32, Color.web("#E4770B"));
-        avatarText = new Text("ID");
+        avatarText = new Text("TE");
         avatarText.setFont(javafx.scene.text.Font.font("Arial", FontWeight.BOLD, 16));
         avatarText.setFill(Color.WHITE);
         avatarPane.getChildren().addAll(avatar, avatarText);
@@ -445,7 +660,7 @@ public class SkillMatrixApp extends Application {
         fileChooser.setInitialFileName("Skill_Matrix_Filtered_Export.xlsx");
         fileChooser.getExtensionFilters().add(new FileChooser.ExtensionFilter("Excel Workbook (*.xlsx)", "*.xlsx"));
 
-        File file = fileChooser.showSaveDialog(root.getScene().getWindow());
+        File file = fileChooser.showSaveDialog(rootStack.getScene().getWindow());
         if (file == null) {
             return;
         }
@@ -515,7 +730,7 @@ public class SkillMatrixApp extends Application {
                 workbook.write(fileOut);
             }
 
-            dbManager.logAction("GUEST", "EXPORT_EXCEL",
+            dbManager.logAction(currentUser, "EXPORT_EXCEL",
                     "Exported " + employeeData.size() + " records to Excel: " + file.getName());
             if (statusLabel != null) {
                 statusLabel.setText("✅ Export successful: " + file.getName());
@@ -561,7 +776,8 @@ public class SkillMatrixApp extends Application {
 
         try {
             List<EmployeeRecord> results = dbManager.searchEmployees(keyword, searchType);
-            employeeData.addAll(results);
+            if (employeeData != null)
+                employeeData.addAll(results);
 
             if (resultsHeaderLabel != null) {
                 resultsHeaderLabel.setText("Total Employees: " + results.size());
@@ -670,11 +886,7 @@ public class SkillMatrixApp extends Application {
         dateValue.setText(emp.getDate() != null ? emp.getDate() : "N/A");
         leaderValue.setText(emp.getLeader() != null ? emp.getLeader().toUpperCase() : "N/A");
 
-        if (emp.getId().length() >= 2) {
-            avatarText.setText(emp.getId().substring(0, 2).toUpperCase());
-        } else {
-            avatarText.setText("ID");
-        }
+        avatarText.setText("TE");
 
         skillsData.clear();
         try {
@@ -685,7 +897,7 @@ public class SkillMatrixApp extends Application {
                     activeLevelFilter));
 
             if (statusLabel != null)
-                statusLabel.setText("✅ Loaded profile for " + emp.getId());
+                statusLabel.setText("Loaded profile for " + emp.getId());
         } catch (SQLException e) {
             System.err.println("[Skill Fetch Error] " + e.getMessage());
             e.printStackTrace();
@@ -707,7 +919,7 @@ public class SkillMatrixApp extends Application {
         try {
             boolean success = dbManager.deleteEmployeeTransaction(selected.getId());
             if (success) {
-                dbManager.logAction("ADMIN", "DELETE_EMPLOYEE",
+                dbManager.logAction(currentUser, "DELETE_EMPLOYEE",
                         "Removed employee: " + selected.getId() + " (" + selected.getName() + ")");
                 if (statusLabel != null)
                     statusLabel.setText("✅ Removed employee: " + selected.getId());
@@ -743,11 +955,17 @@ public class SkillMatrixApp extends Application {
         TextField areaInput = createDialogField("Department/Area");
         TextField leaderInput = createDialogField("Manager Name");
 
+        ComboBox<String> genderCombo = new ComboBox<>();
+        genderCombo.getItems().addAll("Women", "Men");
+        genderCombo.setValue("Women");
+        genderCombo.getStyleClass().add("btn-secondary");
+
         grid.addRow(0, createTitleLabel("Employee ID:"), idInput);
         grid.addRow(1, createTitleLabel("Full Name:"), nameInput);
         grid.addRow(2, createTitleLabel("Start Date:"), dateInput);
         grid.addRow(3, createTitleLabel("Area:"), areaInput);
         grid.addRow(4, createTitleLabel("Team Leader:"), leaderInput);
+        grid.addRow(5, createTitleLabel("Gender:"), genderCombo);
 
         Button saveBtn = new Button("Save Employee");
         saveBtn.getStyleClass().add("btn-primary");
@@ -763,8 +981,9 @@ public class SkillMatrixApp extends Application {
 
             try {
                 dbManager.addEmployee(empId, empName, dateInput.getText().trim(),
-                        areaInput.getText().trim().toUpperCase(), leaderInput.getText().trim().toUpperCase());
-                dbManager.logAction("ADMIN", "ADD_EMPLOYEE", "Added employee ID: " + empId + " (" + empName + ")");
+                        areaInput.getText().trim().toUpperCase(), leaderInput.getText().trim().toUpperCase(),
+                        genderCombo.getValue());
+                dbManager.logAction(currentUser, "ADD_EMPLOYEE", "Added employee ID: " + empId + " (" + empName + ")");
                 statusLabel.setText("✅ Added employee: " + empId);
                 executeSearch();
                 dialog.close();
@@ -780,7 +999,7 @@ public class SkillMatrixApp extends Application {
         layout.setPadding(new Insets(10));
         layout.getStyleClass().addAll("root-container", isDarkMode ? "theme-dark" : "theme-light");
 
-        Scene scene = new Scene(layout, 400, 350);
+        Scene scene = new Scene(layout, 400, 390);
         dialog.setScene(scene);
         dialog.showAndWait();
     }
@@ -854,7 +1073,7 @@ public class SkillMatrixApp extends Application {
             try {
                 dbManager.addSkillWithArea(empId, area, lineInput.getText().trim(), station, levelCombo.getValue(),
                         certPathInput.getText().trim());
-                dbManager.logAction("ADMIN", "ADD_SKILL", "Added skill '" + station + "' for: " + empId);
+                dbManager.logAction(currentUser, "ADD_SKILL", "Added skill '" + station + "' for: " + empId);
                 statusLabel.setText("✅ Added skill for: " + empId);
 
                 if (idValue != null && empId.equals(idValue.getText())) {
@@ -888,7 +1107,7 @@ public class SkillMatrixApp extends Application {
             File file = new File(path);
             if (file.exists()) {
                 Desktop.getDesktop().open(file);
-                dbManager.logAction("GUEST", "VIEW_CERT", "Opened certificate: " + path);
+                dbManager.logAction(currentUser, "VIEW_CERT", "Opened certificate: " + path);
             } else {
                 showFriendlyError("File Not Found",
                         "The requested document file could not be located at the target path.");
@@ -985,7 +1204,7 @@ public class SkillMatrixApp extends Application {
         if (leaderValue != null)
             leaderValue.setText("");
         if (avatarText != null)
-            avatarText.setText("ID");
+            avatarText.setText("TE");
         if (skillsData != null)
             skillsData.clear();
     }
